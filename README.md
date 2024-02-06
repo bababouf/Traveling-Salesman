@@ -7,5 +7,8 @@ problem that seeks to minimize the cost for this route; in other words, what is 
 
 This multithreaded program, written in C++, uses a heuristic approach to solving TSP. 
 ## **_How To Run_**  
+(Steps for MinGW GNU Compiler)  
+
 1. Clone the repository to local filesystem: **_git clone https://github.com/bababouf/Traveling-Salesman.git_**
-2. Run TravelingSalesmanParallel.cpp file
+2. Compile using c++11: **_g++ -std=c++11 TravelingSalesmanParallel.cpp -o TSP_**
+3. Run: **_./TSP.exe_**

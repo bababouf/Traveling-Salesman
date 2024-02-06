@@ -1,4 +1,6 @@
 # **_Traveling-Salesman_**  
+![](https://i.gyazo.com/3c97d9e64f87cfb35b7d00767fb492c0.png)  
+
 ## **_Overview_**  
 A salesman is looking to travel around to several nearby cities, only stopping at each city once. The journey will end when they return back to their home city. The traveling salesman problem is an optimization
 problem that seeks to minimize the cost for this route; in other words, what is the minimum distance required to hit all necessary cities only once and return to the starting city?  

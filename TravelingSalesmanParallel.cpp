@@ -3,16 +3,18 @@
 #include <iomanip>
 #include <pthread.h>
 #include <unistd.h>
-
+#include <vector>
+#include <algorithm>
 
 struct node{
-    std::vector<std::vector<int> > CM; 
+    std::vector<std::vector<int>> configurationMatrix; 
     double lowerBound;
     std::pair<int, int> constraint;
     std::vector<int> V;
     bool include = true;
     bool exclude = true;
 };
+
 
 struct Comparator {
     bool operator()(node const& p1, node const& p2)
@@ -21,18 +23,23 @@ struct Comparator {
     }
 };
 
-bool foundRoute = false;
-bool endProgram = false; 
-bool printNodes = false; 
-bool threadExiting = false;
-int cities = 0;
+struct ProgramVariables {
+    bool foundRoute = false;
+    bool endProgram = false; 
+    bool printNodes = false; 
+    bool threadExiting = false;
+    int cities;
+};
+
 
 pthread_mutex_t mLock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t empty = PTHREAD_COND_INITIALIZER;
 std::priority_queue<node, std::vector<node>, Comparator> Q1;
 std::priority_queue<node, std::vector<node>, Comparator> foundRoutes;   
 
+
 node setup();
+
 void* treeExpansion(void *arg);
 void checkConstraint(node &s);
 bool pruneNodes(node &s, std::priority_queue<node, std::vector<node>, Comparator> Q1);
@@ -41,20 +48,21 @@ void calculateAndCreate(node &s);
 void modifyMatrix(node &s, bool include);
 void print(node s);
 
-/*  In the main function, I first call the setup function which returns the root node. I then call calculateAndCreate to 
-    get the lowerbound for the root. 
+ProgramVariables programVars;
 
-    I created four threads; two will be used for simulation one (using the 5 city example we went over in class), and the other
-    two are used for the second simulation (in which I used 6 cities).
+/*
+    This program ...
 */
 int main()
 {
-    node root = setup();
+    
+    node root = setup(); // Prompts user to choose which simulation to run. Fills configurationMatrix accordingly.
     calculateAndCreate(root);
     Q1.push(root);
     pthread_t T1, T2, T3, T4;
     int l = 1, m = 2, n = 3, o = 4;
-    if(cities == 5)
+
+    if(programVars.cities == 5)
     {
         pthread_create(&T1, NULL, treeExpansion, &l);
         pthread_create(&T2, NULL, treeExpansion, &m);
@@ -77,60 +85,74 @@ int main()
    pthread_cond_destroy(&empty);
 
    return 0;
+
+   
 }
 
-/* This function first prompts user to enter which simulation they would like to run. Then, it sets the configuration Matrix for the root node, which
-    sets all zeros except for last column, which is set to (cities - 1).
-
+/*
+    This method prompts the user to choose between a 5 city simulation and 6 city simulation. Once the selection is made, the configuration matrix will 
+    be set according to the simulation chosen.
 */
 node setup()
 {
     node root;
     int input; 
-    // Prompt user for which simulation to run
+
+        // Prompt user to selection 5-city / 6 city simulation
         do
         {
-            std::cout << "Enter 1 for 5 city simulation (with verbose output), enter 2 for 6 city simulation: ";
+            std::cout << "The salesman is almost ready to embark on their journey. \n " 
+            << "Select which simulation to run:  \n "
+            << "\t For 5-city simulation, choose '1'  \n "
+            << "\t For 6-city simulation, choose '2'  \n "
+            << "\t Choice: ";
             std::cin >> input;
-        } while (input != 1 && input != 2);
 
-        if (input == 1)
+        } while (input != 1 && input != 2); 
+
+        if (input == 1) // 5-city simulation
         {
-            cities = 5;
-            printNodes = true;
+            programVars.cities = 5;
+            programVars.printNodes = true;
         }
-        else
+        else // 6-city simulation
         {
-            cities = 6;
+            programVars.cities = 6;
         }
         std::cout << std::endl;
-        std::vector<std::vector<int> > configurationMatrix(cities, std::vector<int>(cities + 2));
+        std::vector<std::vector<int> > configurationMatrix(programVars.cities, std::vector<int>(programVars.cities + 2)); // Creates 2D vector of ints, with row size = # of cities, column size = (# cities + 2)
 
-    for(int j = 0; j < cities; j++)
+    int lastColumn = programVars.cities + 1;
+
+    // Fill the configurationMatrix. Two additional columns are used to hold hueristic information.
+    for(int row = 0; row < programVars.cities; row++)
         {
-            for(int k = 0; k < (cities + 2); k++)
+            for(int column = 0; column < (programVars.cities + 2); column++)
             {
-                if(k == (cities + 1))
+                if(column == lastColumn) // For each row, the cell in the last column is initialized to (cities - 1)
                 {
-                    configurationMatrix[j][cities + 1] = (cities - 1);
+                    configurationMatrix[row][column] = (programVars.cities - 1);
                 }
-                else
+                else // All other cells in the matrix are initialized to 0
                 {
-                    configurationMatrix[j][k] = 0;
+                    configurationMatrix[row][column] = 0;
                 }  
             } 
         }
-        root.CM = configurationMatrix;
+        
+        root.configurationMatrix = configurationMatrix;
         root.constraint.first = 0;
         root.constraint.second = 0;
-
+        
         return root;
+        
 }
 
 /*
     This is the function that all threads are called to work on. It calls a lot of different functions, and I will elaborate further
     thrughout the function.
 */
+
 void* treeExpansion(void * arg)
 {
     
@@ -151,7 +173,6 @@ void* treeExpansion(void * arg)
 
         }
         
-        
         // At this point, the thread made it out of the while loop and has control of the mutex. It can now safely pop the top node (Q1 is a priority queue so
         // this will be the node with the lowest lowerbound). Once this is done, it frees up the mutex for other threads.
         poppedNode = Q1.top();
@@ -161,9 +182,9 @@ void* treeExpansion(void * arg)
         // Print nodes and threadExiting are boolean global variables. Print nodes is set in the setup() function, and it's either true if we
         // are doing the 5 city simulation, or false if 6 city simulation. I use this so I can toggle on and off my cout statements. The threadExiting
         // variable will be explained further below, but basically I used it to try and get all the other threads to exit once the best route was found. 
-        if (printNodes || threadExiting == true)
+        if (programVars.printNodes || programVars.threadExiting == true)
         {
-            if(threadExiting == true)
+            if(programVars.threadExiting == true)
             {
                 pthread_exit(NULL);
             }
@@ -182,9 +203,9 @@ void* treeExpansion(void * arg)
         bool routeFound = updateConstraint(poppedNode);
 
         // If a route is found, we can now proceed to prune the nodes in the queue that have a lowerbound greater than this. 
-        if (routeFound || threadExiting == true)
+        if (routeFound || programVars.threadExiting == true)
         {
-            if(threadExiting == true)
+            if(programVars.threadExiting == true)
             {
                 pthread_exit(NULL);
             }
@@ -199,9 +220,9 @@ void* treeExpansion(void * arg)
         }
 
         // As stated above, end program is set in the pruneNodes function and indicates best route was found. 
-        if (endProgram == true || threadExiting == true)
+        if (programVars.endProgram == true || programVars.threadExiting == true)
         {
-            if(threadExiting == true)
+            if(programVars.threadExiting == true)
             {
                 pthread_exit(NULL);
             }
@@ -212,11 +233,11 @@ void* treeExpansion(void * arg)
             bestRoute = foundRoutes.top();
             std::cout << "Best route obtained: " << bestRoute.lowerBound << std::endl
                       << std::endl;
-            printNodes = true;
+            programVars.printNodes = true;
             print(bestRoute);
             
             pthread_mutex_unlock(&mLock);
-            threadExiting = true; // This is where the above mentioned threadExiting is set. At this point, the best route is found and other threads 
+            programVars.threadExiting = true; // This is where the above mentioned threadExiting is set. At this point, the best route is found and other threads 
                                    // should proceed to exit. The design of my program made this difficult, since threads can literally be 
                                    // aanywhere and everywhere in the treeExpansion function at any given time. I needed to constantly check this condition so I 
                                    // could get the threads to exit as fast as possible.
@@ -238,7 +259,7 @@ void* treeExpansion(void * arg)
                 calculateAndCreate(includeNode); // We then calculate the lower bound for this node
                 pthread_mutex_lock(&mLock); // Lock because we are going to print and push to the Q1 queue
 
-                if(printNodes)
+                if(programVars.printNodes)
                 {
                     std::cout << "Thread " << *id << " executing" << std::endl << std::endl;
                     std::cout << "Include Node Added" << std::endl;
@@ -255,14 +276,13 @@ void* treeExpansion(void * arg)
                 usleep(10); // I slept each thread for 10 microseconds because when I didn't do this, sometimes one of the threads would seem
                             // to have priority execution and not let the other threads do as much work. I didn't experiment with lowering this value,
                             // but that might be an option to save execution time
-               
-                
+                 
                 
             }
             else
             {   
                 pthread_mutex_lock(&mLock);
-                if(printNodes)
+                if(programVars.printNodes)
                 {
                     std::cout << "Thread " << *id << " executing" << std::endl << std::endl;
                     std::cout << "Cannot further include. Terminating node. " << std::endl << std::endl;
@@ -278,7 +298,7 @@ void* treeExpansion(void * arg)
                 calculateAndCreate(excludeNode);
                 pthread_mutex_lock(&mLock);
                 
-                if(printNodes)
+                if(programVars.printNodes)
                 {
                      std::cout << "Thread " << *id << " executing" << std::endl << std::endl;
                     std::cout << "Exclude Node Added" << std::endl;
@@ -301,7 +321,7 @@ void* treeExpansion(void * arg)
             else
             {
                 pthread_mutex_lock(&mLock);
-                if(printNodes)
+                if(programVars.printNodes)
                 {
                     std::cout << "Thread " << *id << " executing" << std::endl << std::endl;
                     std::cout << "Cannot further exclude. Terminating node. " << std::endl << std::endl;
@@ -314,15 +334,14 @@ void* treeExpansion(void * arg)
 }
 
 // This function calculates the lower bound for a given node
-void calculateAndCreate(node &s)
+void calculateAndCreate(node &nodeX)
 {
     double lower_bound = 0;
     int smallest = 100;
-    std::vector<int> temp;
-    int count = 0;
+    std::priority_queue<int> edgeCosts;
     
-    // Matrix that contains edge cost cells for each simulation
-    std::vector<std::vector<int> > simulationOne {
+    // 2D matrix containing edge costs for 5-city simulation
+    std::vector<std::vector<int> > fiveCitySimulation {
         {0, 3, 4, 2, 7},    
         {3, 0, 4, 6, 3},    
         {4, 4, 0, 5, 8},    
@@ -330,7 +349,8 @@ void calculateAndCreate(node &s)
         {7, 3, 8, 6, 0}     
     };
 
-    std::vector<std::vector<int> > simulationTwo {
+    // 2D matrix containing edge costs for 6-city simulation
+    std::vector<std::vector<int> > sixCitySimulation {
         {0, 2, 4, 1, 7, 2},   
         {3, 0, 2, 7, 3, 4},   
         {4, 9, 0, 7, 8, 2},   
@@ -340,58 +360,63 @@ void calculateAndCreate(node &s)
     };
 
     std::vector<std::vector<int> > adjacencyMatrix;
-    // Cities was set in the setup, so we can use it to determine which data we are using
-    if(cities == 5)
+
+    // Cities was chosen in the setup, so we can use it to determine which data we are using
+    if(programVars.cities == 5)
     {
-        adjacencyMatrix = simulationOne; 
+        adjacencyMatrix = fiveCitySimulation; 
     }
     else
     {
-        adjacencyMatrix = simulationTwo;
+        adjacencyMatrix = sixCitySimulation;
     }
     
-    // Nested for loop through the matrix looking for 1's. 
-    for (int j = 0; j < cities; j++)
+    /* This nested for loop will go through each row, column by column. For each of the rows, a lowerbound and count will be calculated. The count corresponds to how many '1s' were
+    found in the cells for that row in the configurationMatrix. The lowerbound value is calculated by adding up each cell cost in the adjacencyMatrix. 
+    */
+    for (int row = 0; row < programVars.cities; row++)
     {    
-        for (int k = 0; k < cities; k++)
+        int count = 0; // Count is initialized to zero for each row
+
+        for (int column = 0; column < programVars.cities; column++)
         {       
-            if(s.CM[j][k] == 1) 
+            if(nodeX.configurationMatrix[row][column] == 1) // Count and lowerbound values are only updated when a '1' is found in the configurationMatrix
             {       
                 count++;
-                lower_bound += adjacencyMatrix[j][k];   
+                lower_bound += adjacencyMatrix[row][column]; // Add the cost of the adjacencyMatrix cell to the running lower_bound total   
             }
-            else if ((s.CM[j][k] == 0) && (j != k))
+            else if ((nodeX.configurationMatrix[row][column] == 0) && (row != column))
             {
-                temp.push_back(adjacencyMatrix[j][k]); // We save the zeros that aren't along the columns (i.e dont save AA, BB, CC) 
+                 // We save the zeros that aren't along the columns (i.e dont save AA, BB, CC) 
+                edgeCosts.push(adjacencyMatrix[row][column]);
             }
         }
-
-        // Sorts smallest to largest
-        sort(temp.begin(), temp.end());
 
         // Count = 0 indicates we have found no zeros in that row. So, we need to get the two smallest edge costs in this array
         if(count == 0)
         {
-            int s = temp.front();
-            temp.erase(temp.begin());
-            lower_bound+= s; // First one obtained
-            int d = temp.front();
-            temp.erase(temp.begin());
-            lower_bound+=d; // Second one obtained
+            int leastCost = edgeCosts.top();
+            edgeCosts.pop();
+            lower_bound += leastCost; 
+            int nextLeastCost = edgeCosts.top();
+            edgeCosts.pop();
+            lower_bound += nextLeastCost; 
         }
         // We could also have found one 1, and would need to find only the smallest element in the array
         if(count == 1)
         {
-            int s = temp.front();   
-            temp.erase(temp.begin());
-            lower_bound += s;
+            int leastCost = edgeCosts.top();
+            edgeCosts.pop();
+            lower_bound += leastCost;
+
         }
         // If count = 2, the lower bound should be the desired result since we calculated it above 
         count = 0;
-        temp.clear();
+        std::priority_queue<int> empty;
+        std::swap(edgeCosts, empty );
     }
     lower_bound = lower_bound / (double)2;
-    s.lowerBound = lower_bound;
+    nodeX.lowerBound = lower_bound;
 }
 
 // Prints a node
@@ -401,11 +426,11 @@ void print(node s)
     int character = 0;
     char ch = 'A';
     
-    if (printNodes)
+    if (programVars.printNodes)
     {
         std::cout << "Lowerbound : " << s.lowerBound << std::endl << std::endl;
         std::cout << std::setw(2);
-        for(int i = 0; i < cities; i++)
+        for(int i = 0; i < programVars.cities; i++)
         {
             character = int(ch);
             std::cout << ch << "  ";
@@ -416,11 +441,11 @@ void print(node s)
         
         std::cout << "----------------------";
         std::cout << std::endl;
-        for (int j = 0; j < cities; j++)
+        for (int j = 0; j < programVars.cities; j++)
         {
-            for (int k = 0; k < (cities + 2); k++)
+            for (int k = 0; k < (programVars.cities + 2); k++)
             {
-                std::cout << std::setw(2) << s.CM[j][k] << " ";
+                std::cout << std::setw(2) << s.configurationMatrix[j][k] << " ";
             }
             std::cout << std::endl;
         }
@@ -430,8 +455,10 @@ void print(node s)
     
 }
 
-/* This is the pruneNodes function, which will be called after we have found a route and want to prune nodes with lower bound > this.
-*/
+
+//This is the pruneNodes function, which will be called after we have found a route and want to prune nodes with lower bound > this.
+
+
 bool pruneNodes(node &temp, std::priority_queue<node, std::vector<node>, Comparator> Q1)
 {
     int count = 0;
@@ -447,7 +474,7 @@ bool pruneNodes(node &temp, std::priority_queue<node, std::vector<node>, Compara
 
         if (temp.lowerBound >= s.lowerBound)
         {
-            if (printNodes)
+            if (programVars.printNodes)
             {
 
                 std::cout << "Node terminated. Lowerbound: " << temp.lowerBound << " > calculated Route " << std::endl
@@ -463,7 +490,7 @@ bool pruneNodes(node &temp, std::priority_queue<node, std::vector<node>, Compara
     // If empty, we have found the best route
     if (Q1.empty())
     {
-        endProgram = true;
+        programVars.endProgram = true;
         return true;
     }
     else if (count > 0)
@@ -478,8 +505,8 @@ bool pruneNodes(node &temp, std::priority_queue<node, std::vector<node>, Compara
 // Takes a node and a boolean. Boolean is used to determine if we are adding 1's or -1's to the matrix
 void modifyMatrix(node &s, bool include)
 {
-    int excludeColumnTotal = cities - 1;
-    int nextRowExclude = cities -1;
+    int excludeColumnTotal = programVars.cities - 1;
+    int nextRowExclude = programVars.cities -1;
     int includeColumnTotal = 0;
     int nextRowInclude = 0;
     int row, column = 0;
@@ -488,56 +515,55 @@ void modifyMatrix(node &s, bool include)
     {
         row = s.constraint.first;
         column = s.constraint.second;
-        s.CM[row][column] = 1;
+        s.configurationMatrix[row][column] = 1;
         row = s.constraint.second;
         column = s.constraint.first;
-        s.CM[row][column] = 1;        
+        s.configurationMatrix[row][column] = 1;        
     }
     else
     {
         row = s.constraint.first;
         column = s.constraint.second;
-        s.CM[row][column] = -1;
+        s.configurationMatrix[row][column] = -1;
         row = s.constraint.second;
         column = s.constraint.first;
-        s.CM[row][column] = -1;
+        s.configurationMatrix[row][column] = -1;
     }
     
-    for (int i = 0; i < cities; i++)
+    for (int i = 0; i < programVars.cities; i++)
     {
-        if (s.CM[s.constraint.first][i] == 1)
+        if (s.configurationMatrix[s.constraint.first][i] == 1)
         {
             includeColumnTotal += 1;
             excludeColumnTotal -= 1;
             
         }
-        if (s.CM[s.constraint.first + 1][i] == 1)
+        if (s.configurationMatrix[s.constraint.first + 1][i] == 1)
         {
             nextRowInclude += 1;
             nextRowExclude -= 1;
             
         }
-        if (s.CM[s.constraint.first][i] == -1)
+        if (s.configurationMatrix[s.constraint.first][i] == -1)
         {
             excludeColumnTotal -= 1;
             
         }
-        if (s.CM[s.constraint.first + 1][i] == -1)
+        if (s.configurationMatrix[s.constraint.first + 1][i] == -1)
         {
             nextRowExclude -= 1;       
         }
     }
     
-    s.CM[s.constraint.first][cities ] = includeColumnTotal; // Will calculate the 2nd to last column, indicating how many edges have been included
-    s.CM[s.constraint.first + 1][cities] = nextRowInclude;  // Calculates next rows 2nd to last column
-    s.CM[s.constraint.first][cities + 1] = excludeColumnTotal; // calculates last column 
-    s.CM[s.constraint.first + 1][cities + 1] = nextRowExclude; // calculates next rows last column
+    s.configurationMatrix[s.constraint.first][programVars.cities ] = includeColumnTotal; // Will calculate the 2nd to last column, indicating how many edges have been included
+    s.configurationMatrix[s.constraint.first + 1][programVars.cities] = nextRowInclude;  // Calculates next rows 2nd to last column
+    s.configurationMatrix[s.constraint.first][programVars.cities + 1] = excludeColumnTotal; // calculates last column 
+    s.configurationMatrix[s.constraint.first + 1][programVars.cities + 1] = nextRowExclude; // calculates next rows last column
 }
 
-/*
-    This function is used to determine whether we can include/exclude further for a given node
 
-*/
+//This function is used to determine whether we can include/exclude further for a given node
+
 void checkConstraint(node &s)
 {
     s.include = true;
@@ -545,7 +571,7 @@ void checkConstraint(node &s)
     int row = s.constraint.first;
     
     // Can't include if 2nd to last column is 2
-    if (s.CM[row][cities] == 2)
+    if (s.configurationMatrix[row][programVars.cities] == 2)
     {
         s.include = false;
     }
@@ -561,7 +587,7 @@ void checkConstraint(node &s)
     }
 
     // Can't exclude if these conditions are true. 
-    if ((s.CM[row][cities] == 0) && (s.CM[row][cities + 1] == 2) || (s.CM[row][cities] == 1 && s.CM[row][cities + 1] == 1))
+    if ((s.configurationMatrix[row][programVars.cities] == 0) && (s.configurationMatrix[row][programVars.cities + 1] == 2) || (s.configurationMatrix[row][programVars.cities] == 1 && s.configurationMatrix[row][programVars.cities + 1] == 1))
     {
         s.exclude = false;
     }
@@ -571,24 +597,24 @@ void checkConstraint(node &s)
 bool updateConstraint(node &s)
 {
     // We can no longer expand, route is found
-    if((s.constraint.first == cities - 2) && (s.constraint.second == cities - 1))
+    if((s.constraint.first == programVars.cities - 2) && (s.constraint.second == programVars.cities - 1))
     {
         std::cout << "Route found. " << std::endl;
-        foundRoute = true; 
+        programVars.foundRoute = true; 
         
     }
     // Otherwise
-    if(foundRoute == false)
+    if(programVars.foundRoute == false)
     {
         // If we are at the last column, we need to go down a row 
-        if (s.constraint.second == (cities - 1))
+        if (s.constraint.second == (programVars.cities - 1))
         {
             s.constraint.first++; // go down a row
             s.constraint.second = s.constraint.first + 1; // go over to column 1 past what we were just on in the previous row
 
-            if (s.constraint.second > cities - 1)
+            if (s.constraint.second > programVars.cities - 1)
             {
-                s.constraint.second = cities - 1;
+                s.constraint.second = programVars.cities - 1;
             }
         }
         else
@@ -596,7 +622,7 @@ bool updateConstraint(node &s)
             s.constraint.second++;
         }
     }
-    return foundRoute;
+    return programVars.foundRoute;
 }
 
 

@@ -5,9 +5,16 @@
 #include <unistd.h>
 #include <vector>
 #include <algorithm>
-#include "node.h"
 #include <limits>
 
+struct node{
+    std::vector<std::vector<int>> configurationMatrix; 
+    double lowerBound;
+    std::pair<int, int> constraint;
+    std::vector<int> V;
+    bool include = true;
+    bool exclude = true;
+};
   
 int readInSimulationMode();
 node setConfigurationMatrix(int citiesToVisit);
@@ -24,7 +31,12 @@ void calculateLowerBoundForNode(node &s, int citiesToVisit);
 void modifyMatrix(node &s, bool include, int citiesToVisit);
 void print(node s, int citiesToVisit);
 
-
+struct Comparator {
+    bool operator()(node const& p1, node const& p2)
+    {        
+        return p1.lowerBound > p2.lowerBound;
+    }
+};
 
 struct ProgramVariables {
     bool foundRoute = false;

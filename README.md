@@ -79,8 +79,15 @@ The program loop continues until the unprocessedNodesQueue is empty, upon which 
 - Once the last column is reached, the row is incremented by 1. The column then becomes equal to (row + 1). Example: If we are at constraint <0><4>, the constraint now becomes <1><2> for the next iteration. Similarly, if we are at constraint <2><4>, the constraint becomes <3><4>.  
 
 - Updating the constraint is no longer possible (signifying that a route has been found) when we reach a constraint of 
-<(numberOfCities - 2)><(numberOfCities - 1)>. In the above example, <3><4> is the final constraint and cannot be updated.
+<(numberOfCities - 2)><(numberOfCities - 1)>. In the above example, <3><4> is the final constraint and cannot be updated. When a route is found, the updateConstraint method returns true. 
 
+3. _if(routeFound)_ : updateNodeConstraint() returns true if a route is found
+   - If true, that route (node) is pushed into a queue of other found routes. This route is then used to prune all other nodes with a higher lowerbound than it from the unprocessedNodesQueue. For example, if a route is found that contains a lowerbound of 21, all other nodes with a lowerbound >= this will be terminated. 
+   - If false, continue.
+4. _checkConstraint()_ : each node has two boolean variables, one for include and one for exclude. This method determines what these booleans are set to. As discussed earlier, the configurationMatrix for each node contains two additional columns (beyond the n x n cells) that are used to determine whether the cell we are examining (determined by the constraint) can be expanded to include/exclude that edge. The 2nd to last cell (which will be called the inclusion column) contains the number of edges that have been included in that row, and the last column (which will be called the exclusion column) contains the number of edges that can be included or excluded. This is the process for that determination:
+
+- If the inclusion column == 2, that node's include boolean variable is set to false.
+- If the inclusion column  
 
 
 

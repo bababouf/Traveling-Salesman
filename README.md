@@ -53,8 +53,33 @@ Below is the initialized configurationMatrix for the 5-city simulation. The 5 x 
 
 ![](https://i.gyazo.com/59f2fecc8373f3906127cb08f69bf2a8.png)  
 
-## **_Program Loop_**  
-![](https://lucid.app/publicSegments/view/27073b7b-b7b4-4432-9223-9e54c02c01a7/image.png)
+## **_Flowchart_**  
+![](https://lucid.app/publicSegments/view/27073b7b-b7b4-4432-9223-9e54c02c01a7/image.png)  
+
+The program can be broken up into two major parts:
+- Setup
+- Program Loop
+
+**Setup**  
+1. _readInSimulationMode()_ : prompts the user to select between the 5-city or 6-city simulation. All other choices are rejected
+2. _initializeConfigurationMatrix()_ : will initialize the configuration matrix (depending on the simulation selected) as discussed above 
+3. _setAdjacencyMatrix()_ : sets the adjacency matrix to either the 5-city matrix or 6-city matrix
+4. Push root node into unprocessedNodesQueue
+5. _nodeExpansionDispatcher()_ : calling this method starts the program loop
+
+**Program Loop**  
+
+The program loop continues until the unprocessedNodesQueue is empty, upon which the best route will be printed out to the console. Initially, the root node is the only node in the unprocessedNodesQueue. 
+
+1. _aqcuireUnprocessedNode()_ : a node is popped from the unprocessedNodesQueue
+2. _updateNodeConstraint()_ : the constraint, as discussed above, keeps track of the cell that will be examined for inclusion/exclusion. A constraint is a pair of integers (<row><column>). At each iteration in the loop, the constraint is updated a column at a time. The root node starts with a constaint of <0><0>, and is updated as follows:
+
+- The column is incremented until the last column (numberOfCities - 1) is reached. For a 5-city simulation, this is column 4.  
+
+- Once the last column is reached, the row is incremented by 1. The column then becomes equal to (row + 1). Example: If we are at constraint <0><4>, the constraint now becomes <1><2> for the next iteration. Similarly, if we are at constraint <2><4>, the constraint becomes <3><4>.  
+
+- Updating the constraint is no longer possible (signifying that a route has been found) when we reach a constraint of 
+<(numberOfCities - 2)><(numberOfCities - 1)>. In the above example, <3><4> is the final constraint and cannot be updated.
 
 
 

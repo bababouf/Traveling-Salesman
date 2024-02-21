@@ -43,7 +43,7 @@ A node represents a route in expansion, and each of its members contain a critic
 
 **_lowerBound_**: The lowerBound for a node is the total cost (integer value) for the route in its current state.
 
-**_constraint_**: The constraint is a pair of integers (<int><int>) that determine which edge is being currently examined. For example, when the root node is first created and initialized, the constraint is <0><1>, meaning the first edge to be examined is the (0,1) edge from city 'A' to city 'B' (assuming row 0 was city A, row 1 was city B, etc).  
+**_constraint_**: The constraint is a pair of integers that determine which edge is being currently examined. For example, when the root node is first created and initialized, the constraint is <0><1>, meaning the first edge to be examined is the (0,1) edge from city 'A' to city 'B' (where row 0 is city A, row 1 is city B).  
 
 **_include/exclude_**: These boolean flags are set to indicate if a node, given it's constraint, can include or exclude the current edge being examined  
 
@@ -57,7 +57,7 @@ Below is the initialized configurationMatrix for the 5-city simulation. The 5 x 
 ![](https://i.gyazo.com/59f2fecc8373f3906127cb08f69bf2a8.png)  
 
 ## **_Flowchart_**  
-![](https://lucid.app/publicSegments/view/27073b7b-b7b4-4432-9223-9e54c02c01a7/image.png)  
+![](https://i.gyazo.com/cfdd70d09c123412be0a87c743d7f0f6.png)  
 
 The program can be broken up into two major parts:
 - Setup
@@ -67,11 +67,11 @@ The program can be broken up into two major parts:
 1. _readInSimulationMode()_ : prompts the user to select between the 5-city or 6-city simulation. All other choices are rejected
 2. _initializeConfigurationMatrix()_ : will initialize the configuration matrix (depending on the simulation selected) as discussed above 
 3. _setAdjacencyMatrix()_ : sets the adjacency matrix to either the 5-city matrix or 6-city matrix
-4. _nodeExpansionDispatcher()_ : calling this method starts the program loop
 
 **Program Loop**  
 
-The program loop continues until the unprocessedNodesQueue is empty, upon which the best route will be printed out to the console. Initially, the root node is the only node in the unprocessedNodesQueue. 
+
+The program loop starts when _nodeExpansionDispatcher()_ is called, and continues until the unprocessedNodesQueue is empty, upon which the best route will be printed out to the console. Initially, the root node is the only node in the unprocessedNodesQueue. 
 
 1. _aqcuireUnprocessedNode()_ : a node is popped from the unprocessedNodesQueue
 2. _updateNodeConstraint()_ : the constraint, as discussed above, keeps track of the cell that will be examined for inclusion/exclusion. A constraint is a pair of integers (<row><column>). At each iteration in the loop, the constraint is updated a column at a time. The root node starts with a constaint of <0><0>, and is updated as follows:

@@ -86,10 +86,11 @@ The program loop starts when _nodeExpansionDispatcher()_ is called, and continue
 3. _if(routeFound)_ : updateNodeConstraint() returns true if a route is found
    - If true, that route (node) is pushed into a queue of other found routes. This route is then used to prune all other nodes with a higher lowerbound than it from the unprocessedNodesQueue. For example, if a route is found that contains a lowerbound of 21, all other nodes with a lowerbound >= this will be terminated. 
    - If false, continue.
-4. _checkConstraint()_ : each node has two boolean variables, one for include and one for exclude. This method determines what these booleans are set to. As discussed earlier, the configurationMatrix for each node contains two additional columns (beyond the n x n cells) that are used to determine whether the cell we are examining (determined by the constraint) can be expanded to include/exclude that edge. The 2nd to last cell (which will be called the inclusion column) contains the number of edges that have been included in that row, and the last column (which will be called the exclusion column) contains the number of edges that can be included or excluded. This is the process for that determination:
-
-- If the inclusion column == 2, that node's include boolean variable is set to false.
-- If the inclusion column  
+4. _setNodeFlags()_ : each node has two boolean variables, one for include and one for exclude. This method determines what these booleans are set to. As discussed earlier, the configurationMatrix for each node contains two additional columns (beyond the n x n cells) that are used to determine whether the cell we are examining (determined by the constraint) can be expanded to include/exclude that edge. The 2nd to last cell (which will be called the inclusion column) contains the number of edges that have been included in that row, and the last column (which will be called the exclusion column) contains the number of edges that can be included or excluded.
+5. At this point, two threads are created; one is assigned to checkInclude() and one to checkExclude(). If an edge cannot be included or excluded, the thread carrying out that task will simply print to console and terminate the node. Otherwise, the following stage will commence:
+6. ModifyMatrix() will modify a node's configurationMatrix, adding either '1' or '-1' to the appropriate cell. In addition, the includeColumn and excludeColumn will be updated to reflect including/excluding an edge.
+7. CalculateLowerbound() will be called to calculate the new lowerbound for the node
+8. Finally, the updated node(s) will be pushed back into the queue, the threads will be joined, and the main thread will attempt to pop the next node from the queue. 
 
 
 

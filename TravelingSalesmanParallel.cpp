@@ -3,33 +3,36 @@
 #include <iomanip>
 #include <vector>
 #include <thread>
+#include <set>
 
-
-// In this program, a node contains information that pertains to a route being expanded (or one that has reached full expansion).
+// A node encapsulates a "route" in expansion
 struct node{
-    std::vector<std::vector<int>> configurationMatrix; // 2D matrix that contains useful information to identify which edges can be included/excluded
-    double lowerBound; // Cost of the route at it's current point in expansion. Ex: a -> b : lowerBound = 4 (4 is the cost from a -> b)
-    std::pair<int, int> constraint; // Contains the cell (<row><column>) that the node has reached. Important for determining when a route is found (no more cities to visit) 
-    std::vector<int> V; 
-    bool include;
-    bool exclude;
+    std::vector<std::vector<int>> configurationMatrix; // 2D matrix containing included/excluded edges, and information (in the last 2 cells) to determine if further edges can be included/excluded
+    double lowerBound = 0; // Smallest cost of all edges in the route; sums the cost of the current included edges with the least cost edges 
+    std::pair<int, int> constraint; // Indexes a cell (edge) that will be examined for possible inclusion/exclusion
+    bool include; // Set to true if the constraint cell can be included
+    bool exclude; // Set to true if the constraint cell can be excluded
+    std::vector<int> previouslyVisited; // Vector containing cities previously visited. Important for disallowing multiple cycles (TSP allows every city to only be visited once (except home city))
 };
-  
+
+enum City { A, B, C, D, E, F, G };
+
 int readInSimulationMode();
 node initializeConfigurationMatrix();
 void setAdjacencyMatrix();
-void calculateLowerBoundForNode(node &s); 
-void nodeExpansionDispatcher();
-node acquireUnprocessedNode();
+void nodeExpansionDispatcher(node root);
+bool updateNodeConstraint(node &s);
+void checkConstraint(node &s);
 void checkInclude(node poppedNode, int id);
 void checkExclude(node poppedNode, int id);
-void checkConstraint(node &s);
-bool pruneNodes();
-bool updateNodeConstraint(node &s);
 void modifyMatrix(node &s, bool include);
+void calculateLowerBoundForNode(node &s); 
+void pruneNodesUpdated();
 void print(node s);
+std::string cityToString(City city);
+void printBestRoute(node node);
 
-// Compares the lower bounds of two nodes, returns true if p1.lB > p2.lB
+// Compares the lower bounds of two nodes, returns true if p1.lB > p2.lB. Used as comparison function for priority queue.
 struct Comparator {
     bool operator()(node const& p1, node const& p2)
     {        
@@ -41,54 +44,51 @@ struct ProgramVariables {
     /*
         Priority_Queue is a container adapter in the C++ standard library. The first parameter "node" specifies the type being stored.
         The second parameter vector<node> specifies how to store that type, which in this case is a vector of nodes. The third parameter 
-        specifies the comparison function which determines how the nodes are stored. 
+        specifies the comparison function which determines how the nodes are stored. The comparator above is used as this function.
     */
-    std::priority_queue<node, std::vector<node>, Comparator> foundRoutes; // Contains all routes found 
     std::priority_queue<node, std::vector<node>, Comparator> unprocessedNodesQueue; // Contains all nodes that can still be expanded (not complete routes)
     std::vector<std::vector<int> > adjacencyMatrix; // 2D matrix where each cell is the cost between cities. Ex: [a][b] = cost from a->b, b->a
-
+    node foundRoute; 
     bool endProgram = false; 
     int numberOfCitiesToVisit;
 };
 
-pthread_mutex_t queueMutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t printMutex = PTHREAD_MUTEX_INITIALIZER;
-
 ProgramVariables programVariables;
 
+// Driver method
 int main()
 {
-    programVariables.numberOfCitiesToVisit =  readInSimulationMode(); // Sets global int "numberOfCitiesToVisit" value
+    programVariables.numberOfCitiesToVisit = readInSimulationMode(); 
     node root = initializeConfigurationMatrix(); 
     setAdjacencyMatrix();
-    calculateLowerBoundForNode(root);
-    programVariables.unprocessedNodesQueue.push(root);
-    nodeExpansionDispatcher(); // Starts the multithreaded route discovery process
-
+    nodeExpansionDispatcher(root); // Starts the multithreaded route discovery process
     return 0;
    
 }
 
 /*
-    This method will prompt the user to enter '5' for the 5-city simulation, or '6' for the 6-city simulation.
-    Invalid inputs (anything other than numerical '5' or '6') will be rejected and prompt the user to enter a new choice.
+    This method will prompt the user to enter '5' for the 5-city simulation, '6' for the 6-city simulation, or '7' for the 7-city simulation.
+    Invalid inputs (anything other than numerical '5', '6', or '7') will be rejected and prompt the user to enter a new choice.
 */
 int readInSimulationMode()
 {
     int input;
     bool validInput = false;
 
+    std::cout << std::endl;
     std::cout << "The salesman is almost ready to embark on their journey. \n " 
         << "Select which simulation to run:  \n "
         << "\t For 5-city simulation, enter '5'  \n "
-        << "\t For 6-city simulation, enter '6'  \n ";
+        << "\t For 6-city simulation, enter '6'  \n "
+        << "\t For 7-city simulation, enter '7'  \n ";
 
     do
     {
         std::cout << "\t Choice: ";
         std::cin >> input;
 
-        if (std::cin.fail() || input > 6 || input < 5) // Cin.fail() is true when a non-integer input is entered, due to cin >> input (input is integer)
+        if (std::cin.fail() || input > 7 || input < 5) // Cin.fail() is true when a non-integer input is entered, due to cin >> input (input is integer)
         { 
             std::cout << "Invalid input."  << std::endl << std::endl;
             std::cin.clear(); // Clears error status flags from the invalid input 
@@ -100,7 +100,9 @@ int readInSimulationMode()
         }
 
     } while (!validInput); 
-    
+
+    std::cout << std::endl;
+
     return input;
 }
 
@@ -110,27 +112,28 @@ int readInSimulationMode()
     either '0', '1', or '-1'. A cell will contain '1' if the edge has been included in the node's current route, and '-1' if the edge has been excluded 
     (meaning that edge is not in the route). It was stated that the size of the 5-city 2D configurationMatrix for a node is [5][7], and this is because
     two extra columns are needed to hold information to decipher whether an edge for that row can be included or excluded. The decision is made with the 
-    information in each of these columns.
+    information in each of these last two columns.
 
-    The method below initializes the matrix discussed above. To continue with the 5-city example, this method will set the 5 x 5 cells to all '0s'. The last
+    The method below initializes the configurationMatrix for the root node. To continue with the 5-city example, this method will set the 5 x 5 cells to all '0s'. The last
     column will be set to all '4s', and the 2nd to last column will again be set to all '0s'. More information can be found in the readME file.
 */
 node initializeConfigurationMatrix()
 {
     node root;
     int numberOfColumns = programVariables.numberOfCitiesToVisit + 2; 
+    int numberOfRows = programVariables.numberOfCitiesToVisit;
     int lastColumn = programVariables.numberOfCitiesToVisit + 1;
     std::vector<std::vector<int> > configurationMatrix(programVariables.numberOfCitiesToVisit, std::vector<int>(numberOfColumns)); // Creates 2D vector of ints, with row size = # of cities, column size = (# cities + 2)
 
-    for(int row = 0; row < programVariables.numberOfCitiesToVisit; row++)
+    for(int row = 0; row < numberOfRows; row++)
         {
-            for(int column = 0; column < (numberOfColumns); column++)
+            for(int column = 0; column < numberOfColumns; column++)
             {
-                if(column == lastColumn) 
+                if(column == lastColumn) // Exclude column 
                 {
                     configurationMatrix[row][column] = (programVariables.numberOfCitiesToVisit - 1);
                 }
-                else 
+                else // All other columns
                 {
                     configurationMatrix[row][column] = 0;
                 }  
@@ -146,9 +149,9 @@ node initializeConfigurationMatrix()
 }
 
 /*
-    Depending on whether the user chose to run the 5-city or 6-city simulation, the adjacencyMatrix (a global 2D matrix containing costs to travel from city to city)
+    Depending on whether the user chose to run the 5-city, 6-city, or 7-city simulation, the adjacencyMatrix (a global 2D matrix containing costs to travel from city to city)
     will be set. A cell in the adjacencyMatrix can be interpreted as such: [x][y] would correspond to the cost of traveling from city x to city y. The values 
-    for each of the simulations are trivial and somewhat randomly chosen. It's also important to note [x][x] is 0 for all cities, meaning the cost to travel from 
+    for each of the simulations are trivial and randomly chosen. It's also important to note [x][x] is 0 for all cities, meaning the cost to travel from 
     a city to itself is 0.
 */
 void setAdjacencyMatrix()
@@ -165,7 +168,8 @@ void setAdjacencyMatrix()
 
         programVariables.adjacencyMatrix = fiveCitySimulation;
     }
-    else
+
+    else if(programVariables.numberOfCitiesToVisit == 6)
     {
         std::vector<std::vector<int> > sixCitySimulation {
         {0, 2, 4, 1, 7, 2},   
@@ -177,11 +181,295 @@ void setAdjacencyMatrix()
     };
         programVariables.adjacencyMatrix = sixCitySimulation;
     }
+    else
+    {
+        std::vector<std::vector<int> > sevenCitySimulation {
+        {0, 6, 8, 2, 6, 1, 9},   
+        {6, 0, 5, 4, 1, 9, 2},   
+        {8, 5, 0, 6, 1, 1, 8},   
+        {2, 4, 6, 0, 2, 9, 3},   
+        {6, 1, 1, 2, 0, 2, 9},   
+        {1, 9, 1, 9, 2, 0, 7},
+        {9, 2, 8, 3, 9, 7, 0}, 
+    };
+    programVariables.adjacencyMatrix = sevenCitySimulation;
+    }
 }
 
 /*
-    This method will calculate the lower bound for a specific node that is passed to it. This lower bound is the current cost for the node's route at the moment.
-    // Explain later 
+    This dispatcher method contains the main program loop, which is carried out as follows: a node is first popped from the unprocssedNodesQueue, and 
+    is checked to see if it can be expanded further. If a node cannot be expanded, that node contains a route and  It will then be used to prune nodes 
+    from the unprocessedNodesQueue who contain higher lower bounds than it. 
+
+    If a route is not found, it is determined whether the node can include or exclude another edge in that row. For each of the conditions that evaluate
+    to true, a thread will be created and carry out the process of creating another node that contains that include/excluded edge. This(these) node(s) will then
+    be added back into the unprocessedNodesQueue for further expansion.
+*/
+void nodeExpansionDispatcher(node root) 
+{
+    programVariables.unprocessedNodesQueue.push(root);
+
+    while (!programVariables.unprocessedNodesQueue.empty()) // Program loop starts
+    {
+        node poppedNode = programVariables.unprocessedNodesQueue.top(); 
+        programVariables.unprocessedNodesQueue.pop();
+        bool routeFound = updateNodeConstraint(poppedNode); // Initially the constraint for the root node is <0><0>; this updates it to <0><1>. For more details on how the update is carried out, check updateNodeConstraint()
+
+        if (routeFound) 
+        {
+            programVariables.foundRoute = poppedNode;
+            pruneNodesUpdated();
+        }
+        
+        checkConstraint(poppedNode); // Sets each of poppedNode.include and poppedNode.exclude depending on whether or not inclusion/exclusion is possible
+       
+        if (!programVariables.endProgram) 
+        {
+            std::thread includeThread(checkInclude, poppedNode, 1); // Thread created to check if edge can be included
+            includeThread.join(); 
+        }
+        if (!programVariables.endProgram) 
+        {
+            std::thread excludeThread(checkExclude, poppedNode, 2); // Thread created to check if edge can be excluded
+            excludeThread.join(); 
+        } 
+    }
+
+        std::cout << "Best route obtained: " << programVariables.foundRoute.lowerBound << std::endl << std::endl;
+        print(programVariables.foundRoute); 
+        printBestRoute(programVariables.foundRoute);
+
+}
+
+/*
+    The constraint for a node is updated column by column until the end of the row is reached. Upon reaching the end of a row, the row is incremented and the column is 
+    set to the row + 1. Using the 5-city simulation as an example, the constraint would start at <0><0> and would be incremented column by column until it reached <0><4>. 
+    The next update would set the constraint to <1><2>, and consecutive updates would go back to column by column until the end of the row was reached again. 
+
+    This method is also important in that it returns true if a route is found. A route is found when the constraint can no longer be updated. In the 5-city simulation,
+    this would be at <3><4>, for if we tried to update the constraint, we would have <4><5> and fall off the matrix. 
+*/
+bool updateNodeConstraint(node &nodeX)
+{
+    bool foundRoute = false;
+    int currentRow = nodeX.constraint.first;
+    int currentColumn = nodeX.constraint.second;
+    int lastCityIndex = programVariables.numberOfCitiesToVisit - 1; 
+    int secondToLastRow = programVariables.numberOfCitiesToVisit - 2;
+
+    if((currentRow == secondToLastRow) && (currentColumn == lastCityIndex)) // Constraint cannot be updated further; a route has been found
+    {
+        std::cout << "Route found. " << std::endl;
+        foundRoute = true; 
+    }
+    else
+    {
+        if (currentColumn == lastCityIndex) // If the last index is reached, increment the row and set the column to the row + 1
+        {
+            ++currentRow;
+            currentColumn = currentRow + 1;
+        }
+        else // Most common, simply increment the column
+        {
+            ++currentColumn;
+        }
+        
+    }
+
+    // Set constraint for node to updated values
+    nodeX.constraint.first = currentRow; 
+    nodeX.constraint.second = currentColumn;
+    
+    return foundRoute;
+}
+
+/*
+    Each node contains boolean variables to indicate whether the current edge given by the constraint can be included or excluded. This method will 
+    set those boolean variables by examining the last two columns of the configurationMatrix. The second to last column will give the number of edges
+    that have been included for each row, and last column will give the total number of edges that can still be included or excluded. When the configurationMatrix
+    for the root node is first initialized, the last column is set to numberOfCitiesToVisit - 1. To use the 5-city simulation as an example, the last column
+    will be initialized to 4, meaning 4 edges in each row can be included or excluded. 
+
+    When an edge is included, the include column is incremented, and the exclude column is decremented. When an edge is excluded, only the exclude column is decremented.
+*/
+void checkConstraint(node &nodeX)
+{
+    nodeX.include = false;;
+    nodeX.exclude = true;;
+    int currentRow = nodeX.constraint.first;
+    int includeColumn = programVariables.numberOfCitiesToVisit; // # of edges included in a row
+    int excludeColumn = programVariables.numberOfCitiesToVisit + 1; // # of edges that can be included/excluded in a row
+
+    if(nodeX.configurationMatrix[currentRow][includeColumn] < 2) // For an edge to be included, it cannot have 2 edges already included in that row
+    {
+        if(nodeX.configurationMatrix[currentRow][includeColumn] == 0 && nodeX.configurationMatrix[currentRow][excludeColumn] >= 2) // If no edges have been included, and there is still 2 available edges to include/exclude (given by the exclude column), the edge is safe to include
+        {
+            nodeX.include = true;
+        }
+        else if(nodeX.configurationMatrix[currentRow][includeColumn] == 1 && nodeX.configurationMatrix[currentRow][excludeColumn] >= 1) // If 1 edge has been included, and there is at least 1 available edge to include/exclude (given by the exclude column), the edge is safe to include
+        {
+            nodeX.include = true;
+        }
+    }
+
+    // Check if the city (constraint.first) has been included previously. If this is the case, we need to make sure we are not visiting a city that we have also been to (would create a cycle)
+    bool previouslyIncluded = false;
+
+    for(int i = 0; i < nodeX.previouslyVisited.size(); i++)
+    {
+        if(nodeX.constraint.first == nodeX.previouslyVisited[i])
+        {
+            previouslyIncluded = true;
+        }
+    }
+
+    
+    if(previouslyIncluded)
+    {
+        // Check that we are not including a city we have already visited 
+        for(int j = 0; j < nodeX.previouslyVisited.size(); j++)
+        {
+            if(nodeX.constraint.second == nodeX.previouslyVisited[j])
+            {
+                nodeX.include = false;
+            }
+        }
+    }
+
+    // These selection statements determine whether an edge can be excluded. There are two cases where we cannot exclude:
+    if(nodeX.configurationMatrix[currentRow][excludeColumn] == 2 && nodeX.configurationMatrix[currentRow][includeColumn] == 0) // If the exclude column has 2 edges that can be included/excluded AND we have currently 0 included edges
+    {
+        nodeX.exclude = false; 
+    }
+
+    // If 1 edge can be included/excluded AND we either have 1 edge left to include, or 0 edges left to include, we CANNOT exclude
+    if(nodeX.configurationMatrix[currentRow][excludeColumn] == 1 && (nodeX.configurationMatrix[currentRow][includeColumn] == 1 || nodeX.configurationMatrix[currentRow][includeColumn] == 0 )) 
+    {
+        nodeX.exclude = false;
+    }
+}
+
+/*
+    This method is called after it is determined that the current cell edge (given by the constraint) can be included. In order
+    to ensure no race conditions when printing to console, a mutex is used around the cout stream.
+*/
+void checkInclude(node nodeX, int id)
+{
+    
+    if (nodeX.include)
+    {
+        modifyMatrix(nodeX, true); // Adds the edge that will be included to the appropriate configurationMatrix cell
+        calculateLowerBoundForNode(nodeX); // Calculates new lower bound with consideration for included edge
+
+        pthread_mutex_lock(&printMutex);
+        std::cout << "* * * * * * * * * * * * * * *" << std::endl << std::endl;
+        std::cout << "Thread " << id << " executing..." << std::endl;
+        std::cout << "Including edges at " << "[" << nodeX.constraint.first << "][" << nodeX.constraint.second << "]"<< " & ["<< nodeX.constraint.second << "][" << nodeX.constraint.first << "]"<<  std::endl;
+        print(nodeX);
+        pthread_mutex_unlock(&printMutex);
+
+        nodeX.previouslyVisited.push_back(nodeX.constraint.second); // A node carries along a vector of cities that have been visited. This is important for disallowing cycles, and is checked in checkConstraint()
+        programVariables.unprocessedNodesQueue.push(nodeX); // The node, now having an updated lowerbound and constraint, is pushed back into the unprocessedNodesQueue            
+    }
+    else
+    {   
+        pthread_mutex_lock(&printMutex);
+        std::cout << "* * * * * * * * * * * * * * *" << std::endl << std::endl;
+        std::cout << "Thread " << id << " executing..." << std::endl;
+        std::cout << "Cannot further include. Terminating node. " << std::endl << std::endl;
+        pthread_mutex_unlock(&printMutex);
+    }
+
+}
+
+/*
+    This method is called after it is determined that the current cell edge (given by the constraint) can be included. 
+*/
+void checkExclude(node nodeX, int id)
+{
+    
+    if (nodeX.exclude)
+    {
+        modifyMatrix(nodeX, false); // Adds the edge that will be excluded to the appropriate configurationMatrix cell
+        calculateLowerBoundForNode(nodeX); // Calculates new lower bound with consideration for excluded edge
+
+        pthread_mutex_lock(&printMutex);
+        std::cout << "* * * * * * * * * * * * * * *" << std::endl << std::endl;
+        std::cout << "Thread " << id << " executing..." << std::endl;
+        std::cout << "Excluding edges at " << "[" << nodeX.constraint.first << "][" << nodeX.constraint.second << "]"<< " & ["<< nodeX.constraint.second << "][" << nodeX.constraint.first << "]"<<  std::endl;
+        print(nodeX);
+        pthread_mutex_unlock(&printMutex);  
+        
+        programVariables.unprocessedNodesQueue.push(nodeX);        
+    }
+    else
+    {
+        pthread_mutex_lock(&printMutex);
+        std::cout << "* * * * * * * * * * * * * * *" << std::endl << std::endl;
+        std::cout << "Thread " << id << " executing" << std::endl;
+        std::cout << "Cannot further exclude. Terminating node. " << std::endl << std::endl;
+        pthread_mutex_unlock(&printMutex);
+    }
+}
+
+/*
+    Each time an edge is included or excluded, this method is called to update the configurationMatrix for that node. 
+    If an edge is included, two cells are modified with '1s' (X -> Y and Y -> X, given by the constraint). The same is true
+    for excluded edges, except two cells are modified with '-1s'. 
+
+    In addition, each modification to the matrix must updated the last two columns (include and exclude columns). If an edge
+    is added, the include column is incremented, and the exclude column decremented. Again, since we are modifying two cells in two
+    different rows, these columns must be updated for each row. If an edge is excluded, the exclude column only need to be decremented
+    in each of the rows.
+*/
+void modifyMatrix(node &nodeX, bool include)
+{
+    int currentRow = nodeX.constraint.first;
+    int currentColumn = nodeX.constraint.second;
+    int excludeColumn = programVariables.numberOfCitiesToVisit + 1;
+    int includeColumn = programVariables.numberOfCitiesToVisit;
+
+    if(include)
+    {
+        nodeX.configurationMatrix[currentRow][currentColumn] = 1; // Sets current cell to 1
+        nodeX.configurationMatrix[currentColumn][currentRow] = 1; // Sets the symmetrical cell to 1
+
+        nodeX.configurationMatrix[currentRow][includeColumn] += 1; // Increments includeColumn
+        nodeX.configurationMatrix[currentRow][excludeColumn] -= 1; // Decrements excludeColumn 
+        nodeX.configurationMatrix[currentColumn][includeColumn] += 1; // Same for symmetrical cell
+        nodeX.configurationMatrix[currentColumn][excludeColumn] -= 1; // Same for symmetrical cell
+        
+    }
+    else
+    {
+        nodeX.configurationMatrix[currentRow][currentColumn] = -1; // Set current cell to -1
+        nodeX.configurationMatrix[currentColumn][currentRow] = -1; // Set symmetrical cell to -1
+
+        nodeX.configurationMatrix[currentRow][excludeColumn] -= 1; // Decrement excludeColumn
+        nodeX.configurationMatrix[currentColumn][excludeColumn] -= 1; // Same for symmetrical cell
+
+    }
+
+}
+
+/*
+    This method calculates the lowerbound for a given node, which is the smallest possible value that may or may not create a 
+    valid route. The lowerbound is calculated by considering the edges that have been included and excluded thus far. For each row,
+    the costs for the included edges will be taken and accumulated in the lowerbound variable. 
+
+    Each row can have at most two edges included; the traveling salesman problem specifies that a city can only be visited once, meaning 
+    each city can have at most two outgoing edges. Since a row represents the costs from one city to the rest, each row can only 
+    include two edges.
+
+    When calculating the lowerbound for a node, the first edges that are summed are those that have been included. This is done for all rows
+    in each node's configurationMatrix; for example, the root node would start out with no edges included, so the lowerbound will be calculated
+    by taking two of the least cost edges from every row and summing them. This lowerbound, however, may not create a valid route, but it is used
+    as a heuristic to better predict which nodes to expand next. To illustrate how a valid route may not be created here is an example situation assuming we
+    are expanding the root node which has no edges included. 
+
+    In the first row, A -> B and A -> C were included as they were the least cost edges. In the next row, B -> C and B -> D were taken. This has now caused
+    a cycle to be created, formed by A -> B, A -> C, and B -> C; therefore, this route would be invalid. 
+
 */
 void calculateLowerBoundForNode(node &nodeX)
 {
@@ -189,25 +477,27 @@ void calculateLowerBoundForNode(node &nodeX)
     int smallest = 100;
     std::priority_queue<int> edgeCosts;
     
-    for (int row = 0; row < programVariables.numberOfCitiesToVisit; row++)
+    for (int row = 0; row < programVariables.numberOfCitiesToVisit; row++) // All rows in the configurationMatrix are visited
     {    
-        int count = 0; 
+        int count = 0; // Keeps track of the # of included edges in each row; resets for each row
 
-        for (int column = 0; column < programVariables.numberOfCitiesToVisit; column++)
+        for (int column = 0; column < programVariables.numberOfCitiesToVisit; column++) // All columns in the configurationMatrix are visited
         {       
-            if(nodeX.configurationMatrix[row][column] == 1) 
+            if(nodeX.configurationMatrix[row][column] == 1) // Signifies an edge has been included
             {       
-                count++;
-                lower_bound += programVariables.adjacencyMatrix[row][column];  
+                count++; 
+                lower_bound += programVariables.adjacencyMatrix[row][column]; // Add the cost of the included edge to lowerbound running total
             }
-            else if ((nodeX.configurationMatrix[row][column] == 0) && (row != column))
+            else if ((nodeX.configurationMatrix[row][column] == 0) && (row != column)) // This ensures cells that contain -1 are not considered, as well as diagonal cells (A->A, B->B, C->C, etc)
             {
                 edgeCosts.push(programVariables.adjacencyMatrix[row][column]); 
             }
         }
 
-        // Count = 0 indicates we have found no '1s' in that row. So, we need to get the two smallest edge costs in this array
-        if(count == 0)
+        /*
+            After visiting all the cells in a row, count will either be 0, 1, or 2, depending on the number of included edges.
+        */
+        if(count == 0) // If count == 0, no edges have been included and we need to take the two least cost edges and add them to the lowerbound total
         {
             int leastCost = edgeCosts.top();
             edgeCosts.pop();
@@ -216,13 +506,16 @@ void calculateLowerBoundForNode(node &nodeX)
             edgeCosts.pop();
             lower_bound += nextLeastCost; 
         }
-        // We could also have found one '1', and would need to find only the smallest element in the array
+        // We could also have found one '1', and would need to add the least cost edge
         else if(count == 1)
         {
             int leastCost = edgeCosts.top();
             edgeCosts.pop();
             lower_bound += leastCost;
         }
+
+        // If count is 2, we already have the lowerbound added.
+
         count = 0; 
 
         // Empty the edgeCosts priorityQueue by swapping with an empty priority queue
@@ -230,141 +523,55 @@ void calculateLowerBoundForNode(node &nodeX)
         std::swap(edgeCosts, empty );
     }
 
-    lower_bound = lower_bound / 2.0;
+    lower_bound = lower_bound / 2.0; // Divide by 2 since X -> Y and Y -> X have been included in lowerbound calculation 
     nodeX.lowerBound = lower_bound;
 
 }
 
-// Acquire a node from the unprocessedNodesQueue
-node acquireUnprocessedNode() {
+/*
+    After a route is found, this method is called to ensure there are no other nodes that have yet to be expanded that have a smaller
+    lowerbound than the node which contains the foundRoute. 
+*/
+void pruneNodesUpdated()
+{
+   
+    while ((!programVariables.unprocessedNodesQueue.empty()))
+    {
+        node unprocessedNode = programVariables.unprocessedNodesQueue.top(); // Each call to unprocessedNodesQueue.top will be the node with the lowest lowerBound
 
-        node poppedNode = programVariables.unprocessedNodesQueue.top(); 
-        programVariables.unprocessedNodesQueue.pop(); 
-        return poppedNode;
-    
+        if (unprocessedNode.lowerBound >= programVariables.foundRoute.lowerBound)
+        {
+            std::cout << "Node terminated. Lowerbound: " << unprocessedNode.lowerBound << " > calculated Route " << std::endl << std::endl;
+            programVariables.unprocessedNodesQueue.pop();
+        }
+        else
+        {
+            break;
+        }
+       
+    }
+  
+    if (programVariables.unprocessedNodesQueue.empty())
+    {
+        std::cout << "The unprocessed nodes queue is empty, printing best route and ending program..." << std::endl << std::endl;
+        programVariables.endProgram = true;
+    }
+  
+
 }
-
 
 /*
-    This dispatcher method contains the main program loop, which is carried out as follows: a node is first popped from the unprocssedNodesQueue, and 
-    checked to see if it can be expanded further. If a node cannot be expanded, that node contains a route and will pushed to the global foundRoutes 
-    priority queue. It will then be used to prune nodes from the unprocessedNodesQueue who contain higher lower bounds than it. 
-
-    If a route is not found, it will be determined whether the node can include or exclude another edge in that row. For each of the conditions that evaluate
-    to true, a thread will be created and carry out the process of creating another node that contains that include/excluded edge. This(these) node(s) will then
-    be added back into the unprocessedNodesQueue for further expansion.
-
-    Initially, the root node is the only node in the unprocessedNodesQueue. It gets popped, and will always spawn two threads, one for include and one for exclude, 
-    that will result in two additional nodes being added to the unprocessedNodesQueue. In each iteration of the loop, a specific cell is examined to either include or 
-    exclude. The location of the cell is given by the node's contrainst (a pair of ints <int><int> that give the row and column). For example, the constraint for the root
-    node is <0><1>, and in other words, we are looking to see whether or not we can include/exclude the <0><1> (which represents cost of city A -> B). The constraint will
-    be updated column by column for each node, meaning the root node will become<0><2> eventually, and <0><3>, <0><4>. When the last city (last column) is reached, the constraint
-    will + 1 the row, meaning <0><4> becomes <1><0>. However, instead of going back to the 0 column, we will now start at <row><row + 1>, or <1><2>. This is due to the fact that 
-    if we started at <1><0>, we will be including an edge that we already expanded in the first row (<0><1> edge = <1><0> edge since A -> B = B -> A). Columns will continue to progress
-    like the first row (<1><2>, <1><3>, ...).
-
+    Prints the configurationMatrix for a node to the console.
 */
-void nodeExpansionDispatcher() 
-{
-    while (!programVariables.unprocessedNodesQueue.empty()) 
-    {
-        node poppedNode = acquireUnprocessedNode();
-        bool routeFound = updateNodeConstraint(poppedNode);
-
-        if (routeFound) 
-        {
-            programVariables.foundRoutes.push(poppedNode);
-            pruneNodes();
-        }
-        
-        checkConstraint(poppedNode);
-       
-        if (poppedNode.include && !programVariables.endProgram) 
-        {
-            std::thread includeThread(checkInclude, poppedNode, 1);
-            includeThread.join(); // Join only if the thread is created
-        }
-
-        if (poppedNode.exclude && !programVariables.endProgram) 
-        {
-            std::thread excludeThread(checkExclude, poppedNode, 2);
-            excludeThread.join(); // Join only if the thread is created
-        }
-    }
-
-        node bestRoute = programVariables.foundRoutes.top();
-        std::cout << "Best route obtained: " << bestRoute.lowerBound << std::endl << std::endl;
-        print(bestRoute);
-
-}
-
-
-void checkInclude(node poppedNode, int id)
-{
-    
-    if (poppedNode.include)
-    {
-        
-        node includeNode = poppedNode;
-        modifyMatrix(includeNode, true); 
-        calculateLowerBoundForNode(includeNode); 
-        pthread_mutex_lock(&printMutex);
-        std::cout << "Thread " << id << " executing" << std::endl << std::endl;
-        std::cout << "Include Node Added" << std::endl;
-        print(includeNode);
-        pthread_mutex_unlock(&printMutex);
-        pthread_mutex_lock(&queueMutex);
-        includeNode.V.push_back(includeNode.constraint.second);
-        programVariables.unprocessedNodesQueue.push(includeNode);
-        pthread_mutex_unlock(&queueMutex);
-                     
-    }
-    else
-    {   
-        pthread_mutex_lock(&printMutex);
-        std::cout << "Thread " << id << " executing" << std::endl << std::endl;
-        std::cout << "Cannot further include. Terminating node. " << std::endl << std::endl;
-        pthread_mutex_unlock(&printMutex);
-    }
-
-}
-void checkExclude(node poppedNode, int id)
-{
-    
-    if (poppedNode.exclude)
-    {
-        node excludeNode = poppedNode;
-        modifyMatrix(excludeNode, false);
-        calculateLowerBoundForNode(excludeNode);
-        pthread_mutex_lock(&printMutex);
-        std::cout << "Thread " << id << " executing" << std::endl << std::endl;
-        std::cout << "Exclude Node Added" << std::endl;
-        print(excludeNode);
-        pthread_mutex_unlock(&printMutex);  
-        pthread_mutex_lock(&queueMutex);  
-        excludeNode.V.push_back(excludeNode.constraint.second);
-        programVariables.unprocessedNodesQueue.push(excludeNode); 
-        pthread_mutex_unlock(&queueMutex);           
-    }
-    else
-    {
-        pthread_mutex_lock(&printMutex);
-        std::cout << "Thread " << id << " executing" << std::endl << std::endl;
-        std::cout << "Cannot further exclude. Terminating node. " << std::endl << std::endl;
-        pthread_mutex_unlock(&printMutex);
-    }
-}
-
-// This function calculates the lower bound for a given node
-
-// Prints a node
 void print(node nodeX)
 {
     int character = 0;
     char ch = 'A';
-    std::cout << "Lowerbound : " << nodeX.lowerBound << std::endl << std::endl;
+    std::cout << "Lowerbound : " << nodeX.lowerBound << std::endl;
+    std::cout << "Configuration Matrix: " << std::endl << std::endl;
     std::cout << std::setw(2);
 
+    // For each column, the alphabetical character that represents the city is printed
     for(int i = 0; i < programVariables.numberOfCitiesToVisit; i++)
     {
         character = int(ch);
@@ -374,9 +581,8 @@ void print(node nodeX)
     }
 
     std::cout << "#1" << " " << "~#1" << std::endl; 
-    std::cout << "----------------------";
-    std::cout << std::endl;
-
+    
+    // Prints the values for each cell in the configurationMatrix
     for (int row = 0; row < programVariables.numberOfCitiesToVisit; row++)
     {
         for (int column = 0; column < (programVariables.numberOfCitiesToVisit + 2); column++)
@@ -385,199 +591,63 @@ void print(node nodeX)
         }
         std::cout << std::endl;
     }
-    std::cout << "**********************" << std::endl << std::endl;
+    std::cout << std::endl;
     std::cout << "Constraint: " << "<" << nodeX.constraint.first << "><" << nodeX.constraint.second << ">" << std::endl << std::endl;
     
 }
 
 /*
-    This method is called when a route is found, and it is used to 
+    City is an enumeration; this method sets City to a string
 */
-bool pruneNodes()
-{
-    int count = 0;
-    node s = programVariables.foundRoutes.top(); // Gets the best node we have so far in the foundRoutes priority queue
-    bool flag = false;
-
-    // We pop until we have found the next node that is to be expanded, or until the queue is empty, meaning we got the best route
-    //programVariables.unprocessedNodesQueue.pop();
-    node temp;
-    
-    while ((programVariables.unprocessedNodesQueue.empty() == false) && (flag == false))
-    {
-        count++;
-        temp = programVariables.unprocessedNodesQueue.top();
-
-        if (temp.lowerBound >= s.lowerBound)
-        {
-            std::cout << "Node terminated. Lowerbound: " << temp.lowerBound << " > calculated Route " << std::endl << std::endl;
-            programVariables.unprocessedNodesQueue.pop();
-        }
-        else
-        {
-            flag = true;
-        }
+std::string cityToString(City city) {
+    switch (city) {
+        case A: return "A";
+        case B: return "B";
+        case C: return "C";
+        case D: return "D";
+        case E: return "E";
+        case F: return "F";
+        case G: return "G";
+        default: return "";
     }
-  
-    if (count > 0)
-    {
-        updateNodeConstraint(temp);
-    }
-    if (programVariables.unprocessedNodesQueue.empty())
-    {
-        std::cout << "Empty queue empty queue empty queue" << std::endl << std::endl;
-        programVariables.endProgram = true;
-    }
-  
-    
-    return false;
-    
-
-
-}
-
-// Takes a node and a boolean. Boolean is used to determine if we are adding 1's or -1's to the matrix
-void modifyMatrix(node &s, bool include)
-{
-    int excludeColumnTotal = programVariables.numberOfCitiesToVisit - 1;
-    int nextRowExclude = programVariables.numberOfCitiesToVisit -1;
-    int includeColumnTotal = 0;
-    int nextRowInclude = 0;
-    int row, column = 0;
-    
-    if(include)
-    {
-        row = s.constraint.first;
-        column = s.constraint.second;
-        s.configurationMatrix[row][column] = 1;
-        row = s.constraint.second;
-        column = s.constraint.first;
-        s.configurationMatrix[row][column] = 1;        
-    }
-    else
-    {
-        row = s.constraint.first;
-        column = s.constraint.second;
-        s.configurationMatrix[row][column] = -1;
-        row = s.constraint.second;
-        column = s.constraint.first;
-        s.configurationMatrix[row][column] = -1;
-    }
-    
-    for (int i = 0; i < programVariables.numberOfCitiesToVisit; i++)
-    {
-        if (s.configurationMatrix[s.constraint.first][i] == 1)
-        {
-            includeColumnTotal += 1;
-            excludeColumnTotal -= 1;
-            
-        }
-        if (s.configurationMatrix[s.constraint.first + 1][i] == 1)
-        {
-            nextRowInclude += 1;
-            nextRowExclude -= 1;
-            
-        }
-        if (s.configurationMatrix[s.constraint.first][i] == -1)
-        {
-            excludeColumnTotal -= 1;
-            
-        }
-        if (s.configurationMatrix[s.constraint.first + 1][i] == -1)
-        {
-            nextRowExclude -= 1;       
-        }
-    }
-    
-    s.configurationMatrix[s.constraint.first][programVariables.numberOfCitiesToVisit ] = includeColumnTotal; // Will calculate the 2nd to last column, indicating how many edges have been included
-    s.configurationMatrix[s.constraint.first + 1][programVariables.numberOfCitiesToVisit] = nextRowInclude;  // Calculates next rows 2nd to last column
-    s.configurationMatrix[s.constraint.first][programVariables.numberOfCitiesToVisit + 1] = excludeColumnTotal; // calculates last column 
-    s.configurationMatrix[s.constraint.first + 1][programVariables.numberOfCitiesToVisit + 1] = nextRowExclude; // calculates next rows last column
-}
-
-
-//This function is used to determine whether we can include/exclude further for a given node
-
-void checkConstraint(node &s)
-{
-    s.include = true;
-    s.exclude = true;
-    int row = s.constraint.first;
-    
-    // Can't include if 2nd to last column is 2
-    if (s.configurationMatrix[row][programVariables.numberOfCitiesToVisit] == 2 || (s.configurationMatrix[row][programVariables.numberOfCitiesToVisit] == 0 && s.configurationMatrix[row][programVariables.numberOfCitiesToVisit + 1] < 4))
-    {
-        s.include = false;
-    }
-
-    for (int i = 0; i < s.V.size(); i++)
-    {
-        
-        if ((s.constraint.first == s.V[i]) && (s.constraint.second == s.V[i]))
-        {
-            s.include = false;
-            i = 123;
-        }
-    }
-
-    // Can't exclude if these conditions are true. 
-    if ((s.configurationMatrix[row][programVariables.numberOfCitiesToVisit] == 0) && (s.configurationMatrix[row][programVariables.numberOfCitiesToVisit + 1] == 2) || (s.configurationMatrix[row][programVariables.numberOfCitiesToVisit] == 1 && s.configurationMatrix[row][programVariables.numberOfCitiesToVisit + 1] == 1))
-    {
-        s.exclude = false;
-    }
-    if((s.configurationMatrix[row][programVariables.numberOfCitiesToVisit] == 0) && (s.configurationMatrix[row][programVariables.numberOfCitiesToVisit + 1] == 1))
-    {
-        
-        s.exclude = false;
-    }
-    
 }
 
 /*
-    A constraint for a node is an integer pair (<int><int>) that is used to identify when a route is eventually found for a node.
-    The constraint for the root nodes starts at <0><0>. This corresponds to the top left cell of the adjacencyMatrix (the matrix that holds
-    the costs from city to city). As mentioned before, a cell in this matrix [x][y] corresponds to the cost from city x to city y. The adjacencyMatrix
-    is a symmetrical matrix, meaning the [x][y] cell = [y][x] cell.
-
-    In this way, the updateConstraint method does not need to
+    This method will begin at the starting city A, and print the lowest cost route city by city
 */
-bool updateNodeConstraint(node &nodeX)
+void printBestRoute(node nodeX)
 {
-   
-    bool foundRoute = false;
-    
-    // A route is found if we constraint.first is in the 2nd to last row, and we are in the last column of that row. 
-    // This means we have 1 full row under the cell we are in. 
-    if((nodeX.constraint.first == programVariables.numberOfCitiesToVisit - 2) && (nodeX.constraint.second == programVariables.numberOfCitiesToVisit - 1))
-    {
-        std::cout << "Route found. " << std::endl;
-        foundRoute = true; 
-        
-    }
-   
-    // Otherwise, we continue to update constraints in the following manner:
-    else
-    {
-        // If we are at the last column, we need to go down a row 
-        if (nodeX.constraint.second == (programVariables.numberOfCitiesToVisit - 1))
-        {
-            nodeX.constraint.first++; // Next row: if we are at row 0, now we are at row 1
-            nodeX.constraint.second = nodeX.constraint.first + 1; // Instead of starting at column 1, we start at constraint.firs
+    int numberOfCities = programVariables.numberOfCitiesToVisit;
 
-            if (nodeX.constraint.second >= programVariables.numberOfCitiesToVisit - 1)
+    std::vector<City> route;
+    std::set<City> visited;
+    City currentCity = A; // Start from city A
+
+    // While loop makes sure each city is only visited once
+    while (visited.size() < numberOfCities) {
+        route.push_back(currentCity);
+        visited.insert(currentCity);
+
+        for (int j = 0; j < numberOfCities; ++j) {
+            // If the edge has been include in the current column, and we have yet to visit the city
+            if (nodeX.configurationMatrix[currentCity][j] == 1 && visited.find(static_cast<City>(j)) == visited.end()) // visited.find returns visited.end() if not found (meaning city hasnt been visited)
             {
-                nodeX.constraint.second = programVariables.numberOfCitiesToVisit - 1;
+                currentCity = static_cast<City>(j); // Cast j back to city
+                break;
             }
         }
-        else
-        {
-            nodeX.constraint.second++;
-        }
-        
     }
-    
-    return foundRoute;
+
+    // Return to the starting city
+    route.push_back(A);
+
+    // Print the route
+    for (int i = 0; i < route.size() - 1; i++) {
+        std::cout << cityToString(route[i]) << " -> ";
+    }
+    std::cout << cityToString(route.back()) << std::endl;
 }
+
 
 
 

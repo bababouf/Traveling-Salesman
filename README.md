@@ -14,7 +14,7 @@ This multithreaded program, written in C++, offers a heuristic approach in deter
 3. Run: **_./TSP.exe_**
 
 ## **_General Program Details_**  
-This program allows the user to choose between a 5 city simulation and a 6 city simulation (both of which use the same heuristic approach to solving TSP).  
+This program allows the user to choose between a 5, 6, or 7 city simulation (all of which use the same heuristic approach to solving TSP).  
 
 
 ![](https://i.gyazo.com/3f84c2615a346a11914f8def2caffadb.png)  
@@ -25,6 +25,8 @@ Below are the edge costs for each simulation:
 ![](https://i.gyazo.com/e60d252727d2bcc610b76fdfb03d8219.png)  
 **6-City Adjacency Matrix**  
 ![](https://i.gyazo.com/504c62f3931ee6b2f5a5932f0a33d90d.png)  
+**7-City Adjacency Matrix**  
+![](https://i.gyazo.com/1d7a80e0609fd3584833b77e76e66fd7.png)  
 
 Each cell in the above 2D matrices represents the cost to travel from city [row][column]. In this way, the cell [0][1] for the 5-city simulation, which contains the integer value 3, would represent the cost to travel from city 0 to city 1. Throughout the code, as well as in the rest of this readMe file, I will refer to each city in alphabetical order, so row 0 would correspond to city 'A' and row 4 would correspond to city 'E'. In the same way, column 0 would correspond to city 'A' and column 4 would correspond to city 'E'.  
 
@@ -33,19 +35,20 @@ It's important to note here that the adjacency matrices, which are symmetrical a
 ### _Nodes_  
 The main data structure used in this program is a node:  
 
-![](https://i.gyazo.com/a58ae079483da113140144049bcd962e.png)  
+![](https://i.gyazo.com/d49da16b9f3d8c5e2d0a3f6b19a40b51.png)  
 
 A node represents a route in expansion, and each of its members contain a critical piece of information regarding that route. Each member is discussed below.
 
-**_configurationMatrix_**: This 2D matrix (n x (n + 2)) identifies which edges have been include and excluded in the current node's expansion. For the n x n part of the matrix, each cell corresponds to the cell in the adjacency matrix. In other words, [0][1] could be seen as the edge from city 'A' to 'B'. The 2nd to last column holds the number of edges that have been included in that row, and the last column contains the number of edges that can be included or excluded. 
+**_configurationMatrix_**: This 2D matrix keeps track of all edges that have been included/excluded. Two additional columns are used to determine if a cell's edge can be included/excluded.
 
-**_lowerBound_**: The lowerBound for a node is the total cost (integer value) for the route in its current state. If only 3 edges have been included, the lowerBound is the total cost of those 3 edges.  
+**_lowerBound_**: The lowerBound for a node is the total cost (integer value) for the route in its current state.
 
 **_constraint_**: The constraint is a pair of integers (<int><int>) that determine which edge is being currently examined. For example, when the root node is first created and initialized, the constraint is <0><1>, meaning the first edge to be examined is the (0,1) edge from city 'A' to city 'B' (assuming row 0 was city A, row 1 was city B, etc).  
 
-**V**:  
-
 **_include/exclude_**: These boolean flags are set to indicate if a node, given it's constraint, can include or exclude the current edge being examined  
+
+
+**_previouslyVisited_**: A vector containing all cities that have been visited thus far
 
 
 ### _ConfigurationMatrix_  
@@ -64,8 +67,7 @@ The program can be broken up into two major parts:
 1. _readInSimulationMode()_ : prompts the user to select between the 5-city or 6-city simulation. All other choices are rejected
 2. _initializeConfigurationMatrix()_ : will initialize the configuration matrix (depending on the simulation selected) as discussed above 
 3. _setAdjacencyMatrix()_ : sets the adjacency matrix to either the 5-city matrix or 6-city matrix
-4. Push root node into unprocessedNodesQueue
-5. _nodeExpansionDispatcher()_ : calling this method starts the program loop
+4. _nodeExpansionDispatcher()_ : calling this method starts the program loop
 
 **Program Loop**  
 

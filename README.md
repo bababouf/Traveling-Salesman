@@ -64,9 +64,9 @@ The program can be broken up into two major parts:
 - Program Loop
 
 **Setup**  
-1. _readInSimulationMode()_ : prompts the user to select between the 5-city or 6-city simulation. All other choices are rejected
+1. _readInSimulationMode()_ : prompts the user to select between the 5, 6, or 7 city simulation. All other choices are rejected
 2. _initializeConfigurationMatrix()_ : will initialize the configuration matrix (depending on the simulation selected) as discussed above 
-3. _setAdjacencyMatrix()_ : sets the adjacency matrix to either the 5-city matrix or 6-city matrix
+3. _setAdjacencyMatrix()_ : sets the adjacency matrix to either the 5, 6, or 7 city matrix
 
 **Program Loop**  
 
@@ -76,22 +76,37 @@ The program loop starts when _nodeExpansionDispatcher()_ is called, and continue
 1. _aqcuireUnprocessedNode()_ : a node is popped from the unprocessedNodesQueue
 2. _updateNodeConstraint()_ : the constraint, as discussed above, keeps track of the cell that will be examined for inclusion/exclusion. A constraint is a pair of integers (<row><column>). At each iteration in the loop, the constraint is updated a column at a time. The root node starts with a constaint of <0><0>, and is updated as follows:
 
-- The column is incremented until the last column (numberOfCities - 1) is reached. For a 5-city simulation, this is column 4.  
+- The column is incremented until the *last column* (numberOfCities - 1) is reached. For a 5-city simulation, this is column 4.  
 
 - Once the last column is reached, the row is incremented by 1. The column then becomes equal to (row + 1). Example: If we are at constraint <0><4>, the constraint now becomes <1><2> for the next iteration. Similarly, if we are at constraint <2><4>, the constraint becomes <3><4>.  
 
-- Updating the constraint is no longer possible (signifying that a route has been found) when we reach a constraint of 
+- Updating the constraint is *no longer possible* (signifying that a ROUTE has been found) when we reach a constraint of 
 <(numberOfCities - 2)><(numberOfCities - 1)>. In the above example, <3><4> is the final constraint and cannot be updated. When a route is found, the updateConstraint method returns true. 
 
 3. _if(routeFound)_ : updateNodeConstraint() returns true if a route is found
-   - If true, that route (node) is pushed into a queue of other found routes. This route is then used to prune all other nodes with a higher lowerbound than it from the unprocessedNodesQueue. For example, if a route is found that contains a lowerbound of 21, all other nodes with a lowerbound >= this will be terminated. 
+   - If true, that route (node) is pushed into a queue of other found routes. This route is then used to prune all other nodes with a higher lowerbound than it from the unprocessedNodesQueue. In the three simulations, each time a route is found it *IS* the best possible route, and all other nodes are terminated from the queue. I will talk more about this in the analysis section below.  
    - If false, continue.
 4. _setNodeFlags()_ : each node has two boolean variables, one for include and one for exclude. This method determines what these booleans are set to. As discussed earlier, the configurationMatrix for each node contains two additional columns (beyond the n x n cells) that are used to determine whether the cell we are examining (determined by the constraint) can be expanded to include/exclude that edge. The 2nd to last cell (which will be called the inclusion column) contains the number of edges that have been included in that row, and the last column (which will be called the exclusion column) contains the number of edges that can be included or excluded.
 5. At this point, two threads are created; one is assigned to checkInclude() and one to checkExclude(). If an edge cannot be included or excluded, the thread carrying out that task will simply print to console and terminate the node. Otherwise, the following stage will commence:
-6. ModifyMatrix() will modify a node's configurationMatrix, adding either '1' or '-1' to the appropriate cell. In addition, the includeColumn and excludeColumn will be updated to reflect including/excluding an edge.
-7. CalculateLowerbound() will be called to calculate the new lowerbound for the node
-8. Finally, the updated node(s) will be pushed back into the queue, the threads will be joined, and the main thread will attempt to pop the next node from the queue. 
+6. ModifyMatrix() will modify a node's configurationMatrix, adding either '1' or '-1' to the appropriate cell. Since the configurationMatrix is symmetrical (X -> Y == Y -> X) two cells need to be modified with either '1s' or '-1s'. In addition, the includeColumn and excludeColumn for both of these rows that the modified cells are in will be updated. For example, if [0][1] is the edge being added, [1][0] will also be modified and both the include columns for each of those rows will be incremented. Finally, each row's exclude column will be decremented. 
+7. CalculateLowerbound() will be called to calculate the new lowerbound for the node. This method takes into account a node's current included edges, plus the lowest cost edges in all other rows. The total cost summed together is the lowerbound for the node, and it may or may not lead to a valid route. For example, if A -> B and A -> C were the node's current included edges, B -> C could potentially be chosen as the least cost edge for the next row, closing the route off (A -> B -> C) before the rest of the cities could be explored. The lowerbound is calculated as a "best guess" heuristic to help decide which node to expand next. 
+8. Finally, the updated node(s) will be pushed back into the queue, the threads will be joined, and the main thread will attempt to pop the next node from the queue. In the event that the queue is empty, a route will have been found and all other nodes would have been pruned from the queue. Once this is carried out, the best route will be printed to console.
 
+**5 City Simulation Route Found:**  
+
+![](https://i.gyazo.com/056b0f8755f0fd01e10eb9f5ab7cb51e.png)  
+ 
+## **_Analysis_**  
+
+A naive approach to solving the Traveling Salesman Problem might use brute force, where every possible route is calculated. For X number of cities, this would require (X - 1)! permutations to compute a cost for.  
+
+Using 3 cities as an example, the possible routes would be (3 - 1)!:  
+A -> B -> C -> A
+A -> C -> B -> A  
+
+As the number of cities grow, however, this number becomes much larger. For 7 cities, the required permutations to compute would be 6!, or 720.  
+
+Another approach is the one taken with this program: branch-and-bound. At every step, only a partial solution is explored. The lowerbound calculated for each node serves as a heuristic to guide the search, prioritizing nodes who contain the lowest lowerbounds. In this way, only a subset of the entire search space must be explored. 
 
 
 

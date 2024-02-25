@@ -8,25 +8,27 @@
 // A node encapsulates a "route" in expansion
 struct node{
     std::vector<std::vector<int>> configurationMatrix; // 2D matrix containing included/excluded edges, and information (in the last 2 cells) to determine if further edges can be included/excluded
-    double lowerBound = 0; // Smallest cost of all edges in the route; sums the cost of the current included edges with the least cost edges 
+    double lowerBound; // Smallest cost of all edges in the route; sums the cost of the current included edges with the least cost edges 
     std::pair<int, int> constraint; // Indexes a cell (edge) that will be examined for possible inclusion/exclusion
     bool include; // Set to true if the constraint cell can be included
     bool exclude; // Set to true if the constraint cell can be excluded
     std::vector<int> previouslyVisited; // Vector containing cities previously visited. Important for disallowing multiple cycles (TSP allows every city to only be visited once (except home city))
 };
 
+int TOTAL = 0;
 enum City { A, B, C, D, E, F, G };
 
 int readInSimulationMode();
 node initializeConfigurationMatrix();
 void setAdjacencyMatrix();
 void nodeExpansionDispatcher(node root);
-bool updateNodeConstraint(node &s);
-void checkConstraint(node &s);
+bool updateNodeConstraint(node &node);
+void setNodeFlags(node &node);
+bool checkForCycles(node nodeX);
 void checkInclude(node poppedNode, int id);
 void checkExclude(node poppedNode, int id);
-void modifyMatrix(node &s, bool include);
-void calculateLowerBoundForNode(node &s); 
+void modifyMatrix(node &node, bool include);
+void calculateLowerBoundForNodeUpdated(node &node); 
 void pruneNodesUpdated();
 void print(node s);
 std::string cityToString(City city);
@@ -143,6 +145,7 @@ node initializeConfigurationMatrix()
         root.configurationMatrix = configurationMatrix;
         root.constraint.first = 0;
         root.constraint.second = 0;
+        root.lowerBound = 0;
         
         return root;
         
@@ -191,6 +194,7 @@ void setAdjacencyMatrix()
         {6, 1, 1, 2, 0, 2, 9},   
         {1, 9, 1, 9, 2, 0, 7},
         {9, 2, 8, 3, 9, 7, 0}, 
+
     };
     programVariables.adjacencyMatrix = sevenCitySimulation;
     }
@@ -221,18 +225,16 @@ void nodeExpansionDispatcher(node root)
             pruneNodesUpdated();
         }
         
-        checkConstraint(poppedNode); // Sets each of poppedNode.include and poppedNode.exclude depending on whether or not inclusion/exclusion is possible
+        setNodeFlags(poppedNode); // Sets each of poppedNode.include and poppedNode.exclude depending on whether or not inclusion/exclusion is possible
        
         if (!programVariables.endProgram) 
         {
             std::thread includeThread(checkInclude, poppedNode, 1); // Thread created to check if edge can be included
-            includeThread.join(); 
-        }
-        if (!programVariables.endProgram) 
-        {
             std::thread excludeThread(checkExclude, poppedNode, 2); // Thread created to check if edge can be excluded
-            excludeThread.join(); 
-        } 
+            includeThread.join();
+            excludeThread.join();  
+        }
+       
     }
 
         std::cout << "Best route obtained: " << programVariables.foundRoute.lowerBound << std::endl << std::endl;
@@ -292,7 +294,7 @@ bool updateNodeConstraint(node &nodeX)
 
     When an edge is included, the include column is incremented, and the exclude column is decremented. When an edge is excluded, only the exclude column is decremented.
 */
-void checkConstraint(node &nodeX)
+void setNodeFlags(node &nodeX)
 {
     nodeX.include = false;;
     nodeX.exclude = true;;
@@ -312,7 +314,28 @@ void checkConstraint(node &nodeX)
         }
     }
 
+
+    bool canInclude = checkForCycles(nodeX);
+    nodeX.include = canInclude;
     // Check if the city (constraint.first) has been included previously. If this is the case, we need to make sure we are not visiting a city that we have also been to (would create a cycle)
+    
+
+    // These selection statements determine whether an edge can be excluded. There are two cases where we cannot exclude:
+    if(nodeX.configurationMatrix[currentRow][excludeColumn] == 2 && nodeX.configurationMatrix[currentRow][includeColumn] == 0) // If the exclude column has 2 edges that can be included/excluded AND we have currently 0 included edges
+    {
+        nodeX.exclude = false; 
+    }
+
+    // If 1 edge can be included/excluded AND we either have 1 edge left to include, or 0 edges left to include, we CANNOT exclude
+    if(nodeX.configurationMatrix[currentRow][excludeColumn] == 1 && (nodeX.configurationMatrix[currentRow][includeColumn] == 1 || nodeX.configurationMatrix[currentRow][includeColumn] == 0 )) 
+    {
+        nodeX.exclude = false;
+    }
+}
+
+
+bool checkForCycles(node nodeX)
+{
     bool previouslyIncluded = false;
 
     for(int i = 0; i < nodeX.previouslyVisited.size(); i++)
@@ -329,25 +352,16 @@ void checkConstraint(node &nodeX)
         // Check that we are not including a city we have already visited 
         for(int j = 0; j < nodeX.previouslyVisited.size(); j++)
         {
-            if(nodeX.constraint.second == nodeX.previouslyVisited[j])
+            if(nodeX.constraint.second == nodeX.previouslyVisited[j] && nodeX.constraint.first != programVariables.numberOfCitiesToVisit - 2)
             {
-                nodeX.include = false;
+                return false;
             }
         }
     }
+    return true;    
 
-    // These selection statements determine whether an edge can be excluded. There are two cases where we cannot exclude:
-    if(nodeX.configurationMatrix[currentRow][excludeColumn] == 2 && nodeX.configurationMatrix[currentRow][includeColumn] == 0) // If the exclude column has 2 edges that can be included/excluded AND we have currently 0 included edges
-    {
-        nodeX.exclude = false; 
-    }
-
-    // If 1 edge can be included/excluded AND we either have 1 edge left to include, or 0 edges left to include, we CANNOT exclude
-    if(nodeX.configurationMatrix[currentRow][excludeColumn] == 1 && (nodeX.configurationMatrix[currentRow][includeColumn] == 1 || nodeX.configurationMatrix[currentRow][includeColumn] == 0 )) 
-    {
-        nodeX.exclude = false;
-    }
 }
+
 
 /*
     This method is called after it is determined that the current cell edge (given by the constraint) can be included. In order
@@ -359,7 +373,10 @@ void checkInclude(node nodeX, int id)
     if (nodeX.include)
     {
         modifyMatrix(nodeX, true); // Adds the edge that will be included to the appropriate configurationMatrix cell
-        calculateLowerBoundForNode(nodeX); // Calculates new lower bound with consideration for included edge
+        nodeX.lowerBound += programVariables.adjacencyMatrix[nodeX.constraint.first][nodeX.constraint.second]; // update lowerbound
+        TOTAL++;
+        std::cout << "Total: " << TOTAL << std::endl << std::endl;
+        //calculateLowerBoundForNodeUpdated(nodeX); // Calculates new lower bound with consideration for included edge
 
         pthread_mutex_lock(&printMutex);
         std::cout << "* * * * * * * * * * * * * * *" << std::endl << std::endl;
@@ -368,6 +385,7 @@ void checkInclude(node nodeX, int id)
         print(nodeX);
         pthread_mutex_unlock(&printMutex);
 
+        nodeX.previouslyVisited.push_back(nodeX.constraint.first);
         nodeX.previouslyVisited.push_back(nodeX.constraint.second); // A node carries along a vector of cities that have been visited. This is important for disallowing cycles, and is checked in checkConstraint()
         programVariables.unprocessedNodesQueue.push(nodeX); // The node, now having an updated lowerbound and constraint, is pushed back into the unprocessedNodesQueue            
     }
@@ -391,7 +409,7 @@ void checkExclude(node nodeX, int id)
     if (nodeX.exclude)
     {
         modifyMatrix(nodeX, false); // Adds the edge that will be excluded to the appropriate configurationMatrix cell
-        calculateLowerBoundForNode(nodeX); // Calculates new lower bound with consideration for excluded edge
+        //calculateLowerBoundForNode(nodeX); // Calculates new lower bound with consideration for excluded edge
 
         pthread_mutex_lock(&printMutex);
         std::cout << "* * * * * * * * * * * * * * *" << std::endl << std::endl;
@@ -453,84 +471,7 @@ void modifyMatrix(node &nodeX, bool include)
 }
 
 /*
-    This method calculates the lowerbound for a given node, which is the smallest possible value that may or may not create a 
-    valid route. The lowerbound is calculated by considering the edges that have been included and excluded thus far. For each row,
-    the costs for the included edges will be taken and accumulated in the lowerbound variable. 
-
-    Each row can have at most two edges included; the traveling salesman problem specifies that a city can only be visited once, meaning 
-    each city can have at most two outgoing edges. Since a row represents the costs from one city to the rest, each row can only 
-    include two edges.
-
-    When calculating the lowerbound for a node, the first edges that are summed are those that have been included. This is done for all rows
-    in each node's configurationMatrix; for example, the root node would start out with no edges included, so the lowerbound will be calculated
-    by taking two of the least cost edges from every row and summing them. This lowerbound, however, may not create a valid route, but it is used
-    as a heuristic to better predict which nodes to expand next. To illustrate how a valid route may not be created here is an example situation assuming we
-    are expanding the root node which has no edges included. 
-
-    In the first row, A -> B and A -> C were included as they were the least cost edges. In the next row, B -> C and B -> D were taken. This has now caused
-    a cycle to be created, formed by A -> B, A -> C, and B -> C; therefore, this route would be invalid. 
-
-*/
-void calculateLowerBoundForNode(node &nodeX)
-{
-    double lower_bound = 0;
-    int smallest = 100;
-    std::priority_queue<int> edgeCosts;
-    
-    for (int row = 0; row < programVariables.numberOfCitiesToVisit; row++) // All rows in the configurationMatrix are visited
-    {    
-        int count = 0; // Keeps track of the # of included edges in each row; resets for each row
-
-        for (int column = 0; column < programVariables.numberOfCitiesToVisit; column++) // All columns in the configurationMatrix are visited
-        {       
-            if(nodeX.configurationMatrix[row][column] == 1) // Signifies an edge has been included
-            {       
-                count++; 
-                lower_bound += programVariables.adjacencyMatrix[row][column]; // Add the cost of the included edge to lowerbound running total
-            }
-            else if ((nodeX.configurationMatrix[row][column] == 0) && (row != column)) // This ensures cells that contain -1 are not considered, as well as diagonal cells (A->A, B->B, C->C, etc)
-            {
-                edgeCosts.push(programVariables.adjacencyMatrix[row][column]); 
-            }
-        }
-
-        /*
-            After visiting all the cells in a row, count will either be 0, 1, or 2, depending on the number of included edges.
-        */
-        if(count == 0) // If count == 0, no edges have been included and we need to take the two least cost edges and add them to the lowerbound total
-        {
-            int leastCost = edgeCosts.top();
-            edgeCosts.pop();
-            lower_bound += leastCost; 
-            int nextLeastCost = edgeCosts.top();
-            edgeCosts.pop();
-            lower_bound += nextLeastCost; 
-        }
-        // We could also have found one '1', and would need to add the least cost edge
-        else if(count == 1)
-        {
-            int leastCost = edgeCosts.top();
-            edgeCosts.pop();
-            lower_bound += leastCost;
-        }
-
-        // If count is 2, we already have the lowerbound added.
-
-        count = 0; 
-
-        // Empty the edgeCosts priorityQueue by swapping with an empty priority queue
-        std::priority_queue<int> empty; 
-        std::swap(edgeCosts, empty );
-    }
-
-    lower_bound = lower_bound / 2.0; // Divide by 2 since X -> Y and Y -> X have been included in lowerbound calculation 
-    nodeX.lowerBound = lower_bound;
-
-}
-
-/*
-    After a route is found, this method is called to ensure there are no other nodes that have yet to be expanded that have a smaller
-    lowerbound than the node which contains the foundRoute. 
+    After a route is found, this method terminates all other nodes from the queue that have a higher lowerbound
 */
 void pruneNodesUpdated()
 {
@@ -571,6 +512,7 @@ void print(node nodeX)
     std::cout << "Configuration Matrix: " << std::endl << std::endl;
     std::cout << std::setw(2);
 
+
     // For each column, the alphabetical character that represents the city is printed
     for(int i = 0; i < programVariables.numberOfCitiesToVisit; i++)
     {
@@ -582,6 +524,7 @@ void print(node nodeX)
 
     std::cout << "#1" << " " << "~#1" << std::endl; 
     
+    
     // Prints the values for each cell in the configurationMatrix
     for (int row = 0; row < programVariables.numberOfCitiesToVisit; row++)
     {
@@ -591,6 +534,7 @@ void print(node nodeX)
         }
         std::cout << std::endl;
     }
+    
     std::cout << std::endl;
     std::cout << "Constraint: " << "<" << nodeX.constraint.first << "><" << nodeX.constraint.second << ">" << std::endl << std::endl;
     

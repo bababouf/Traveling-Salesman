@@ -101,19 +101,12 @@ The program loop starts when _nodeExpansionDispatcher()_ is called, and continue
 
 **5 City Simulation Route Found:**  
 
-![](https://i.gyazo.com/056b0f8755f0fd01e10eb9f5ab7cb51e.png)  
- 
-## **_Analysis_**  
+![](https://i.gyazo.com/77d6f717d66ace14d854271c4f118bff.png)  
 
-A naive approach to solving the Traveling Salesman Problem might use brute force, where every possible route is calculated. For X number of cities, this would require (X - 1)! permutations to compute a cost for.  
 
-Using 3 cities as an example, the possible routes would be (3 - 1)!:  
-A -> B -> C -> A
-A -> C -> B -> A  
 
-As the number of cities grow, however, this number becomes much larger. For 7 cities, the required permutations to compute would be 6!, or 720.  
 
-Another approach is the one taken with this program: branch-and-bound. At every step, only a partial solution is explored. The lowerbound calculated for each node serves as a heuristic to guide the search, prioritizing nodes who contain the lowest lowerbounds. In this way, only a subset of the entire search space must be explored. 
+
 
 
 

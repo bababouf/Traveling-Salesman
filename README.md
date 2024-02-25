@@ -28,9 +28,11 @@ Below are the edge costs for each simulation:
 **7-City Adjacency Matrix**  
 ![](https://i.gyazo.com/1d7a80e0609fd3584833b77e76e66fd7.png)  
 
-Each cell in the above 2D matrices represents the cost to travel from city [row][column]. In this way, the cell [0][1] for the 5-city simulation, which contains the integer value 3, would represent the cost to travel from city 0 to city 1. Throughout the code, as well as in the rest of this readMe file, I will refer to each city in alphabetical order, so row 0 would correspond to city 'A' and row 4 would correspond to city 'E'. In the same way, column 0 would correspond to city 'A' and column 4 would correspond to city 'E'.  
+Each cell in the adjacency matrix represents the cost to travel from city one city to another. For example, the cell (0,1) would represent the cost to travel from city '0' to city '1'. This edge cost is the same as the edge cost to get from city '1' to city '0', since the matrices are symmetrical. In addition, the cost to get from one city to itself is zero, which is the reason why each of the matrices has zeroes along the diagonal.  
 
-It's important to note here that the adjacency matrices, which are symmetrical and square, contain all zeroes along their diagonals. This is due to the fact that the cost from one city to itself is 0. In addition, since the matrix is symmetrical, all the values are mirrored, meaning cell [row][column] = [column][row], or the cost from city 'A' to 'B' = cost of city 'B' to 'A'.
+
+
+
 
 ### _Nodes_  
 The main data structure used in this program is a node:  
@@ -41,18 +43,22 @@ A node represents a route in expansion, and each of its members contain a critic
 
 **_configurationMatrix_**: This 2D matrix keeps track of all edges that have been included/excluded. Two additional columns are used to determine if a cell's edge can be included/excluded.
 
-**_lowerBound_**: The lowerBound for a node is the total cost (integer value) for the route in its current state.
+**_lowerBound_**: The lowerBound for a node is the total cost for the edges that have been included so far.
 
-**_constraint_**: The constraint is a pair of integers that determine which edge is being currently examined. For example, when the root node is first created and initialized, the constraint is <0><1>, meaning the first edge to be examined is the (0,1) edge from city 'A' to city 'B' (where row 0 is city A, row 1 is city B).  
+**_constraint_**: The constraint is a pair of integers that determine which edge is being currently examined. For example, when the root node is first created and initialized, the constraint is (0, 0). Each time a node is popped the constraint will be updated and examined if an edge can be included or excluded.   
 
 **_include/exclude_**: These boolean flags are set to indicate if a node, given it's constraint, can include or exclude the current edge being examined  
 
 
-**_previouslyVisited_**: A vector containing all cities that have been visited thus far
+**_previouslyVisited_**: A vector containing all cities that have been visited 
 
 
 ### _ConfigurationMatrix_  
-Below is the initialized configurationMatrix for the 5-city simulation. The 5 x 5 cells in the matrix are all set to 0, indicating that no edges in the matrix have been included or excluded. The last column, however, is set to (numberOfCities - 1), which is 4 for the 5 city simulation. This indicates that for each row in the matrix, 4 edges can be included or excluded. This column is set to (numberOfCities - 1) since a route cannot contain an edge from a city to itself.  
+Below is the initialized configurationMatrix for the 5-city simulation. The matrix itself is size 5 x 7; the 5 x 5 part of the matrix reprsents the edges from one city to the next. The last two columns hold information that determine whether a specific edge can be included or excluded.  
+
+I will refer to the 2nd to last column as the "include column" and the last column as the "exclude column". The include column ensures that each row contains a maximum of two edges (since each city can only have two edges to be a valid TSP route). For example, row '0', which represents city '0', contains all the edges from city '0' to every other city. If three edges were included in this row, city '0' would not be a valid TSP route.  
+
+The exclude column is initialized to the number of cities in the simulation minus one. This column keeps track of the number of edges that have been either excluded or included. If an edge is included or excluded, the appropriate cell in that column is decremented. 
 
 ![](https://i.gyazo.com/59f2fecc8373f3906127cb08f69bf2a8.png)  
 

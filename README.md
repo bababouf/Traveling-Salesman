@@ -2,8 +2,8 @@
 ![](https://i.gyazo.com/3c97d9e64f87cfb35b7d00767fb492c0.png)  
 
 ## **_Overview_**  
-A salesman is looking to travel around to several nearby cities, only stopping at each city once. The journey will end when they return back to their home city. The traveling salesman problem is an optimization
-problem that seeks to minimize the cost for this route; in other words, what is the minimum distance required to hit all necessary cities only once and return to the starting city?  
+A salesman is looking to travel around to several nearby cities, stopping at each city only once. The journey will end when they return back to their home city. The traveling salesman problem is an optimization
+problem that seeks to minimize the cost for this route. In other words, what is the minimum distance required to hit all necessary cities only once and return to the starting city?  
 
 This multithreaded program, written in C++, offers a heuristic approach in determining the optimal route for TSP. 
 ## **_How To Run_**  
@@ -14,10 +14,10 @@ This multithreaded program, written in C++, offers a heuristic approach in deter
 3. Run: **_./TSP.exe_**
 
 ## **_General Program Details_**  
-This program allows the user to choose between a 5, 6, or 7 city simulation (all of which use the same heuristic approach to solving TSP).  
+This program allows the user to choose between a 5, 6, or 7 city simulation. 
 
 
-![](https://i.gyazo.com/3f84c2615a346a11914f8def2caffadb.png)  
+![](https://i.gyazo.com/ca826145a575909e1f93ce00bb877f02.png)  
 
 Below are the edge costs for each simulation:  
 
